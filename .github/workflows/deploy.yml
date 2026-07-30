@@ -21,6 +21,11 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  # The web build only needs esbuild; Electron's ~100MB binary is dead weight
+  # here and its download is a needless way for the deploy to fail.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
 jobs:
   build:
     runs-on: ubuntu-latest
