@@ -1,0 +1,2165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <title>FitTrack</title>
+  <script src="./lib/react.min.js"></script>
+  <script src="./lib/react-dom.min.js"></script>
+  <script src="./lib/supabase.min.js"></script>
+  <script src="./config.js"></script>
+  <script src="./sync.js"></script>
+  <script src="./lib/babel.min.js"></script>
+  <style>
+    :root {
+      --bg:    #0a0b12;
+      --card:  #12141f;
+      --card2: #1a1d2b;
+      --card3: #232740;
+      --border:  #222538;
+      --border2: #2f3350;
+      --text:  #e7eaf6;
+      --muted: #8b92b5;
+      --accent: #6366f1;
+      --cal:   #f472b6;
+      --prot:  #a78bfa;
+      --carb:  #fbbf24;
+      --fat:   #fb923c;
+      --fiber: #34d399;
+      --water: #38bdf8;
+      --green: #34d399;
+      --red:   #f87171;
+      --r: 16px; --rs: 11px; --rl: 20px;
+      --sidebar: 224px;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html, body { height:100%; }
+    body {
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      background:var(--bg); color:var(--text); overflow:hidden;
+      -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    }
+    #root { height:100%; }
+    button { font-family:inherit; cursor:pointer; border:none; outline:none; background:none; color:inherit; }
+    input,select,textarea { font-family:inherit; outline:none; }
+    ::selection { background:rgba(99,102,241,0.35); }
+
+    .scroll-area::-webkit-scrollbar, .modal::-webkit-scrollbar { width:11px; height:11px; }
+    .scroll-area::-webkit-scrollbar-thumb, .modal::-webkit-scrollbar-thumb { background:var(--border2); border-radius:999px; border:3px solid transparent; background-clip:padding-box; }
+    .scroll-area::-webkit-scrollbar-thumb:hover { background:#3a3f63; background-clip:padding-box; }
+    .scroll-area::-webkit-scrollbar-track, .modal::-webkit-scrollbar-track { background:transparent; }
+    .sug-scroll::-webkit-scrollbar { height:8px; }
+    .sug-scroll::-webkit-scrollbar-thumb { background:var(--border2); border-radius:999px; }
+    .sug-scroll::-webkit-scrollbar-track { background:transparent; }
+
+    #loading { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; flex-direction:column; gap:16px; z-index:999; }
+    .spinner { width:38px; height:38px; border:3px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin 0.75s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* ── APP SHELL ── */
+    .app { display:grid; grid-template-columns:var(--sidebar) 1fr; height:100vh; width:100vw; }
+
+    .sidebar { background:linear-gradient(180deg,#0e0f1a,#0b0c14); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:20px 14px; gap:6px; overflow:hidden; }
+    .brand { display:flex; align-items:center; gap:12px; padding:6px 8px 20px; }
+    .brand-mark { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg,#6366f1,#a78bfa); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 8px 20px -5px rgba(99,102,241,0.65); }
+    .brand-text { font-size:19px; font-weight:800; letter-spacing:-0.02em; white-space:nowrap; }
+    .nav-cap { font-size:9px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.14em; padding:6px 12px; }
+    .nav { display:flex; flex-direction:column; gap:4px; flex:1; }
+    .nav-item { display:flex; align-items:center; gap:13px; padding:11px 13px; border-radius:12px; color:var(--muted); font-size:14px; font-weight:600; transition:all 0.15s; white-space:nowrap; }
+    .nav-item:hover { background:var(--card); color:var(--text); }
+    .nav-item.active { background:rgba(99,102,241,0.13); color:#cdd0ff; }
+    .nav-item.active .nav-ico { color:var(--accent); }
+    .nav-ico { display:flex; align-items:center; justify-content:center; width:20px; flex-shrink:0; }
+    .nav-label { white-space:nowrap; }
+    .sidebar-foot { margin-top:auto; }
+    .weight-chip-side { width:100%; display:flex; align-items:center; gap:12px; padding:11px 13px; border-radius:12px; background:var(--card); border:1px solid var(--border); transition:all 0.15s; }
+    .weight-chip-side:hover { border-color:var(--accent); }
+    .weight-chip-side .nav-ico { color:var(--accent); }
+    .ws-k { font-size:9px; color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:0.08em; }
+    .ws-v { font-size:13px; font-weight:700; margin-top:1px; }
+
+    .main { display:flex; flex-direction:column; height:100vh; min-width:0; overflow:hidden; }
+    .topbar { flex-shrink:0; height:68px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 26px; gap:14px; background:rgba(10,11,18,0.8); backdrop-filter:blur(10px); }
+    .topbar-left { min-width:0; display:flex; align-items:center; }
+    .topbar-title { font-size:21px; font-weight:800; letter-spacing:-0.02em; }
+    .topbar-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+    .datenav { display:flex; align-items:center; gap:9px; }
+    .date-btn { width:35px; height:35px; border-radius:10px; background:var(--card); border:1px solid var(--border); color:var(--muted); display:flex; align-items:center; justify-content:center; transition:all 0.15s; flex-shrink:0; }
+    .date-btn:hover { color:var(--text); border-color:var(--border2); background:var(--card2); }
+    .datenav-label { text-align:center; min-width:200px; }
+    .datenav-main { font-size:15px; font-weight:700; letter-spacing:-0.01em; white-space:nowrap; }
+    .datenav-sub { font-size:10px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.1em; margin-top:1px; }
+    .today-pill { padding:8px 13px; border-radius:10px; background:rgba(99,102,241,0.13); border:1px solid rgba(99,102,241,0.3); color:var(--accent); font-size:12px; font-weight:700; white-space:nowrap; transition:all 0.15s; }
+    .today-pill:hover { background:rgba(99,102,241,0.22); }
+    .weight-chip { padding:10px 15px; border-radius:11px; background:var(--card); border:1px solid var(--border); font-size:13px; font-weight:700; color:var(--text); transition:all 0.15s; white-space:nowrap; }
+    .weight-chip:hover { border-color:var(--accent); color:var(--accent); }
+    .btn-accent { display:flex; align-items:center; gap:7px; padding:10px 17px; border-radius:11px; background:var(--accent); color:#fff; font-size:13px; font-weight:700; transition:all 0.15s; white-space:nowrap; box-shadow:0 4px 14px -3px rgba(99,102,241,0.55); }
+    .btn-accent:hover { background:#5457e0; transform:translateY(-1px); }
+    .btn-accent:active { transform:translateY(0); }
+
+    .scroll-area { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; }
+    .content { padding:24px 26px 52px; max-width:1480px; margin:0 auto; width:100%; }
+    .section-label { font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.13em; margin-bottom:11px; }
+    .card { background:var(--card); border-radius:var(--r); border:1px solid var(--border); overflow:hidden; }
+
+    /* ── DASHBOARD GRID ── */
+    .dash-grid { display:grid; grid-template-columns:360px 1fr; gap:18px; align-items:start; }
+    .dash-left { display:flex; flex-direction:column; gap:16px; position:sticky; top:0; }
+    .dash-right { display:flex; flex-direction:column; gap:18px; min-width:0; }
+
+    /* ── CALORIES ── */
+    .cal-card { padding:24px 20px 20px; text-align:center; }
+    .cal-ring-row { display:flex; justify-content:center; margin-bottom:18px; }
+    .ring-big { font-size:32px; font-weight:800; line-height:1; letter-spacing:-0.03em; }
+    .ring-sub { font-size:11px; color:var(--muted); margin-top:5px; font-weight:600; }
+    .cal-badge { display:inline-block; font-size:13px; font-weight:700; padding:8px 18px; border-radius:999px; margin-bottom:18px; }
+    .cal-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .cal-stat { background:var(--card2); border-radius:var(--rs); border:1px solid var(--border); padding:13px 8px; }
+    .cal-stat-val { font-size:19px; font-weight:800; letter-spacing:-0.02em; }
+    .cal-stat-lbl { font-size:9px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-top:4px; }
+
+    /* ── MACROS ── */
+    .macro-card { padding:18px; }
+    .macro-rings { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .mc { display:flex; flex-direction:column; align-items:center; gap:9px; }
+    .mc-name { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.07em; }
+    .mc-rem { font-size:9px; font-weight:700; padding:3px 9px; border-radius:999px; }
+
+    /* ── BARS ── */
+    .bar-row { margin-bottom:14px; }
+    .bar-row:last-child { margin-bottom:0; }
+    .bar-meta { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+    .bar-name { font-size:12px; font-weight:700; }
+    .bar-nums { font-size:11px; }
+    .bar-track { background:rgba(255,255,255,0.06); border-radius:999px; overflow:hidden; }
+    .bar-fill { border-radius:999px; transition:width 0.6s cubic-bezier(0.4,0,0.2,1); }
+
+    /* ── ACTIVITY MINI CARDS ── */
+    .activity-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:16px; align-items:start; }
+    .mini-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:18px; display:flex; flex-direction:column; }
+    .mini-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+    .mini-title { display:flex; align-items:center; gap:9px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.07em; color:var(--muted); }
+    .mini-ico { width:28px; height:28px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .water-num { font-size:30px; font-weight:800; color:var(--water); line-height:1; letter-spacing:-0.03em; }
+    .water-unit { font-size:13px; color:var(--muted); margin-left:3px; font-weight:600; }
+    .water-btns { display:flex; gap:7px; margin-top:14px; }
+    .w-btn { flex:1; padding:9px 2px; background:rgba(56,189,248,0.09); border:1px solid rgba(56,189,248,0.22); border-radius:9px; color:var(--water); font-size:12px; font-weight:700; transition:all 0.15s; }
+    .w-btn:hover { background:rgba(56,189,248,0.2); }
+    .w-custom { padding:9px 13px; background:var(--card2); border:1px solid var(--border2); border-radius:9px; color:var(--muted); font-size:13px; font-weight:700; transition:all 0.15s; }
+    .w-custom:hover { color:var(--text); }
+    .burned-num { font-size:27px; font-weight:800; color:var(--green); letter-spacing:-0.03em; }
+    .sleep-num { font-size:27px; font-weight:800; letter-spacing:-0.03em; }
+    .sleep-lbl { font-size:11px; color:var(--muted); font-weight:600; margin-top:4px; }
+    .log-mini-btn { display:flex; align-items:center; justify-content:center; gap:6px; padding:10px; border-radius:10px; font-size:12px; font-weight:700; transition:all 0.15s; width:100%; margin-top:14px; }
+    .log-mini-btn.green { background:rgba(52,211,153,0.1); border:1px solid rgba(52,211,153,0.25); color:var(--green); }
+    .log-mini-btn.green:hover { background:rgba(52,211,153,0.2); }
+    .log-mini-btn.purple { background:rgba(167,139,250,0.1); border:1px solid rgba(167,139,250,0.25); color:var(--prot); }
+    .log-mini-btn.purple:hover { background:rgba(167,139,250,0.2); }
+    .workout-row { display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--border); }
+    .workout-dot { width:8px; height:8px; border-radius:50%; background:var(--green); flex-shrink:0; }
+    .workout-info { flex:1; min-width:0; }
+    .workout-name { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .workout-detail { font-size:10px; color:var(--muted); margin-top:1px; }
+    .workout-kcal { font-size:13px; font-weight:800; color:var(--green); flex-shrink:0; }
+
+    /* ── MEALS ── */
+    .meals-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:13px; }
+    .meals-title { font-size:17px; font-weight:800; letter-spacing:-0.01em; }
+    .meal-group-header { display:flex; align-items:center; gap:9px; padding:14px 16px 9px; }
+    .meal-group-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .meal-group-name { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.1em; }
+    .meal-row { display:flex; align-items:center; gap:13px; padding:13px 16px; border-top:1px solid var(--border); transition:background 0.12s; }
+    .meal-row:hover { background:rgba(255,255,255,0.02); }
+    .meal-badge { border-radius:11px; display:flex; align-items:center; justify-content:center; font-weight:800; flex-shrink:0; letter-spacing:-0.02em; }
+    .meal-info { flex:1; min-width:0; }
+    .meal-name { font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .meal-serving { font-size:11px; color:var(--muted); margin-top:2px; }
+    .meal-pills { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+    .pill { font-size:10px; font-weight:700; padding:3px 8px; border-radius:7px; letter-spacing:0.02em; }
+    .meal-cal-block { text-align:right; flex-shrink:0; }
+    .meal-cal-num { font-size:16px; font-weight:800; letter-spacing:-0.02em; }
+    .meal-cal-lbl { font-size:9px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+    .icon-btn { width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.15s; }
+    .icon-btn-edit { background:rgba(99,102,241,0.1); color:var(--accent); }
+    .icon-btn-edit:hover { background:rgba(99,102,241,0.22); }
+    .icon-btn-del { background:rgba(248,113,113,0.1); color:var(--red); }
+    .icon-btn-del:hover { background:rgba(248,113,113,0.22); }
+    .empty-state { padding:52px 16px; text-align:center; }
+    .empty-state-title { font-size:15px; font-weight:700; margin-bottom:6px; }
+    .empty-state-sub { font-size:13px; color:var(--muted); }
+
+    .ring-wrap { position:relative; display:inline-block; }
+    .ring-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+
+    /* ── SUGGESTIONS ── */
+    .sug-scroll { display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; }
+    .sug-card { flex-shrink:0; width:182px; background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:15px; display:flex; flex-direction:column; gap:9px; transition:all 0.15s; }
+    .sug-card:hover { border-color:var(--border2); transform:translateY(-2px); }
+    .sug-label { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:3px 9px; border-radius:999px; }
+    .sug-name { font-size:13px; font-weight:800; line-height:1.3; }
+    .sug-desc { font-size:11px; color:var(--muted); line-height:1.45; flex:1; }
+    .sug-cal { font-size:18px; font-weight:800; color:var(--cal); letter-spacing:-0.02em; }
+    .sug-pills, .sug-tags { display:flex; gap:4px; flex-wrap:wrap; }
+    .sug-tag { font-size:9px; font-weight:700; padding:2px 8px; border-radius:999px; }
+    .sug-log-btn { width:100%; padding:9px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:9px; color:var(--accent); font-size:12px; font-weight:700; transition:all 0.15s; }
+    .sug-log-btn:hover { background:rgba(99,102,241,0.2); }
+
+    /* ── MODALS ── */
+    .overlay { position:fixed; inset:0; background:rgba(6,7,12,0.72); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:200; padding:24px; }
+    .modal { background:var(--card); border-radius:var(--rl); border:1px solid var(--border2); padding:26px; width:100%; max-width:500px; max-height:90vh; overflow-y:auto; animation:fadeScale 0.2s cubic-bezier(0.16,1,0.3,1); box-shadow:0 24px 64px -12px rgba(0,0,0,0.65); }
+    @keyframes fadeScale { from { opacity:0; transform:scale(0.96) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+    .modal-handle { display:none; }
+    .modal-title { font-size:19px; font-weight:800; margin-bottom:18px; letter-spacing:-0.02em; }
+    .field { margin-bottom:14px; }
+    .field-lbl { font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:7px; }
+    .input { width:100%; padding:12px 13px; background:var(--card2); border:1.5px solid var(--border); border-radius:var(--rs); color:var(--text); font-size:15px; transition:all 0.15s; }
+    .input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,0.15); }
+    .input::placeholder { color:var(--muted); }
+    .row2 { display:flex; gap:10px; }
+    .row2 .field { flex:1; }
+    .row4 { display:flex; gap:9px; }
+    .row4 .field { flex:1; }
+    .meal-type-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+    .mt-btn { padding:11px 4px; border-radius:var(--rs); background:var(--card2); border:1.5px solid var(--border); color:var(--muted); font-size:12px; font-weight:700; display:flex; flex-direction:column; align-items:center; gap:6px; transition:all 0.15s; }
+    .mt-btn:hover { border-color:var(--border2); color:var(--text); }
+    .mt-dot { width:9px; height:9px; border-radius:50%; transition:all 0.15s; }
+    .mt-btn.sel { border-color:var(--accent); background:rgba(99,102,241,0.12); color:var(--text); }
+    .modal-actions { display:flex; gap:10px; margin-top:20px; }
+    .btn { display:flex; align-items:center; justify-content:center; gap:6px; padding:13px 18px; border-radius:var(--rs); font-size:14px; font-weight:700; transition:all 0.15s; }
+    .btn-primary { background:var(--accent); color:#fff; flex:1; box-shadow:0 4px 14px -3px rgba(99,102,241,0.5); }
+    .btn-primary:hover { background:#5457e0; }
+    .btn-primary:disabled { opacity:0.4; cursor:default; box-shadow:none; }
+    .btn-ghost { background:var(--card2); border:1px solid var(--border2); color:var(--text); }
+    .btn-ghost:hover { border-color:var(--muted); }
+    .btn-sm { padding:8px 14px; font-size:12px; }
+    .workout-preset-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .wp-btn { padding:12px 4px; border-radius:var(--rs); background:var(--card2); border:1.5px solid var(--border); color:var(--muted); font-size:12px; font-weight:700; transition:all 0.15s; }
+    .wp-btn:hover { color:var(--text); border-color:var(--border2); }
+    .wp-btn.sel { border-color:var(--green); color:var(--green); background:rgba(52,211,153,0.1); }
+
+    /* ── FOOD SEARCH ── */
+    .lib-search-wrap { position:relative; }
+    .lib-search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; display:flex; }
+    .lib-search { padding-left:38px !important; }
+    .lib-results { background:var(--card2); border:1px solid var(--border); border-radius:var(--rs); overflow:hidden; margin-top:8px; }
+    .lib-result { display:flex; align-items:center; gap:10px; padding:11px 13px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; }
+    .lib-result:last-child { border-bottom:none; }
+    .lib-result:hover { background:var(--card3); }
+    .lib-result-name { font-size:13px; font-weight:700; }
+    .lib-result-macros { font-size:10px; color:var(--muted); margin-top:3px; }
+    .lib-result-cal { font-size:15px; font-weight:800; color:var(--cal); flex-shrink:0; }
+    .lib-result-add { padding:6px 12px; border-radius:8px; background:rgba(99,102,241,0.14); color:var(--accent); font-size:11px; font-weight:700; flex-shrink:0; transition:all 0.12s; }
+    .lib-result-add:hover { background:rgba(99,102,241,0.26); }
+    .save-toggle { display:flex; align-items:center; gap:11px; padding:13px; cursor:pointer; background:rgba(99,102,241,0.07); border-radius:var(--rs); border:1px solid rgba(99,102,241,0.2); margin-top:14px; transition:all 0.15s; }
+    .save-toggle:hover { background:rgba(99,102,241,0.11); }
+    .save-toggle-box { width:19px; height:19px; border-radius:5px; border:1.5px solid var(--accent); background:var(--card2); display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.15s; }
+    .save-toggle-box.checked { background:var(--accent); }
+    .save-toggle-label { font-size:13px; font-weight:600; }
+    .divider { height:1px; background:var(--border); margin:16px 0; }
+    .divider-lbl { text-align:center; margin:-9px 0 14px; }
+    .divider-lbl span { background:var(--card); padding:0 12px; font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; }
+    .unit-select { background:var(--card2); border:1.5px solid var(--border); border-radius:var(--rs); color:var(--text); font-size:14px; font-weight:600; padding:12px 10px; cursor:pointer; -webkit-appearance:none; appearance:none; text-align:center; transition:all 0.15s; min-width:96px; }
+    .unit-select:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,0.15); }
+    .unit-select option { background:var(--card2); }
+    .sleep-hours-preview { text-align:center; padding:18px; background:var(--card2); border-radius:var(--rs); border:1px solid var(--border); margin-bottom:14px; }
+    .sleep-hours-big { font-size:38px; font-weight:800; letter-spacing:-0.03em; line-height:1; }
+    .sleep-hours-sub { font-size:12px; color:var(--muted); margin-top:6px; font-weight:500; }
+
+    /* ── HISTORY ── */
+    .hist-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; }
+    .hist-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:16px 18px; cursor:pointer; transition:all 0.15s; }
+    .hist-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+    .hist-card-empty { opacity:0.5; }
+    .hist-card-empty:hover { opacity:0.85; transform:none; border-color:var(--border2); }
+    .hist-head { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+    .hist-date { font-size:14px; font-weight:800; letter-spacing:-0.01em; }
+    .hist-sub { font-size:11px; color:var(--muted); margin-top:3px; }
+    .hist-weight { font-size:11px; color:var(--muted); font-weight:700; }
+    .hist-macros { display:flex; gap:8px; margin-bottom:11px; }
+    .hist-m { flex:1; text-align:center; }
+    .hist-m-val { font-size:13px; font-weight:800; }
+    .hist-m-lbl { font-size:8px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-top:3px; }
+    .hist-chevron { color:var(--border2); display:flex; }
+
+    /* ── PROFILE ── */
+    .profile-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
+    .pcol { display:flex; flex-direction:column; gap:14px; min-width:0; }
+    .stats-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .stat-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:16px 12px; text-align:center; }
+    .stat-val { font-size:22px; font-weight:800; letter-spacing:-0.02em; }
+    .stat-lbl { font-size:9px; color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:0.08em; margin-top:4px; }
+    .goal-prog { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:18px; }
+    .goal-prog-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .goal-prog-title { font-size:14px; font-weight:700; }
+    .goal-prog-pct { font-size:24px; font-weight:800; color:var(--accent); letter-spacing:-0.02em; }
+    .goals-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .goal-box { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:15px; }
+    .goal-box-lbl { font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:7px; }
+    .goal-box-val { font-size:22px; font-weight:800; letter-spacing:-0.02em; }
+    .goal-box-unit { font-size:11px; color:var(--muted); }
+    .action-row { display:flex; gap:10px; }
+    .action-btn { flex:1; padding:13px; border-radius:var(--r); background:var(--card); border:1.5px solid var(--border2); color:var(--muted); font-size:13px; font-weight:700; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:8px; }
+    .action-btn:hover { border-color:var(--accent); color:var(--accent); }
+    .chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:18px; }
+    .db-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:16px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; transition:all 0.15s; }
+    .db-card:hover { border-color:var(--accent); }
+    .weight-log { display:flex; flex-direction:column; gap:7px; }
+    .weight-entry { display:flex; align-items:center; justify-content:space-between; padding:11px 14px; background:var(--card); border:1px solid var(--border); border-radius:var(--rs); }
+    .weight-entry-date { font-size:12px; color:var(--muted); font-weight:600; }
+    .weight-entry-val { font-size:15px; font-weight:800; }
+    .lib-food-row { display:flex; align-items:center; gap:11px; padding:12px 14px; border-bottom:1px solid var(--border); }
+    .lib-food-row:last-child { border-bottom:none; }
+    .lib-food-info { flex:1; min-width:0; }
+    .lib-food-name { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .lib-food-macros { font-size:10px; color:var(--muted); margin-top:3px; }
+    .lib-food-cal { font-size:15px; font-weight:800; color:var(--cal); flex-shrink:0; }
+
+    /* ── ONBOARDING ── */
+    .onboard { height:100%; overflow-y:auto; display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+    .onboard-inner { width:100%; max-width:440px; }
+    .onboard-mark { width:60px; height:60px; border-radius:18px; background:linear-gradient(135deg,#6366f1,#a78bfa); display:flex; align-items:center; justify-content:center; margin:0 auto 18px; box-shadow:0 12px 32px -6px rgba(99,102,241,0.6); }
+    .onboard-title { font-size:32px; font-weight:800; letter-spacing:-0.03em; text-align:center; }
+    .onboard-sub { font-size:15px; color:var(--muted); margin:6px 0 30px; text-align:center; }
+    .onboard-card { background:var(--card); border:1px solid var(--border); border-radius:var(--rl); padding:24px; }
+    .ob-section { font-size:10px; font-weight:800; color:var(--accent); text-transform:uppercase; letter-spacing:0.12em; margin:22px 0 14px; }
+    .ob-section:first-child { margin-top:0; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width:1180px) {
+      .dash-grid { grid-template-columns:1fr; }
+      .dash-left { position:static; }
+    }
+    @media (max-width:920px) {
+      :root { --sidebar:72px; }
+      .brand-text, .nav-label, .nav-cap, .ws-block { display:none; }
+      .brand { justify-content:center; padding:6px 0 20px; }
+      .nav-item { justify-content:center; padding:13px 0; }
+      .weight-chip-side { justify-content:center; padding:13px 0; gap:0; }
+      .profile-grid { grid-template-columns:1fr; }
+    }
+    @media (max-width:680px) {
+      .topbar { padding:0 16px; height:62px; }
+      .content { padding:18px 16px 44px; }
+      .datenav-label { min-width:128px; }
+      .datenav-main { font-size:13px; }
+      .topbar-add-label { display:none; }
+      .goals-grid { grid-template-columns:1fr 1fr; }
+      .weight-chip { display:none; }
+    }
+
+    /* ── PHONE: sidebar becomes a bottom tab bar ─────────────────────────── */
+    /* The icon rail works down to tablet width, but on a handset a thumb-reach
+       bottom bar is the only layout that feels like a native app. */
+    @media (max-width:560px) {
+      .app {
+        grid-template-columns:1fr;
+        grid-template-rows:1fr auto;
+        height:100dvh;
+      }
+      .main { order:1; height:auto; min-height:0; }
+      .sidebar {
+        order:2;
+        flex-direction:row;
+        align-items:stretch;
+        border-right:none;
+        border-top:1px solid var(--border);
+        padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+        gap:2px;
+      }
+      .brand { display:none; }
+      .nav { display:flex; flex-direction:row; flex:1; gap:2px; }
+      .nav-item {
+        flex:1; flex-direction:column; gap:3px;
+        padding:8px 0 6px; border-radius:var(--rs);
+      }
+      .nav-label {
+        display:block; font-size:10px; font-weight:700;
+        letter-spacing:0.01em; line-height:1;
+      }
+      .sidebar-foot { margin-top:0; display:flex; }
+      .weight-chip-side { flex-direction:column; gap:3px; padding:8px 14px 6px; }
+      .topbar { padding:0 12px; padding-top:env(safe-area-inset-top); height:auto; min-height:58px; }
+      .content { padding-bottom:20px; }
+      .modal, .modal-card { max-height:88dvh; }
+    }
+
+    /* ── SYNC + ENVIRONMENT CHROME ───────────────────────────────────────── */
+    .sync-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px; border-radius:999px; cursor:pointer;
+      background:var(--card2); border:1px solid var(--border2);
+      font-size:11px; font-weight:700; color:var(--muted); white-space:nowrap;
+    }
+    .sync-pill:hover { border-color:var(--accent); color:var(--text); }
+    .sync-dot { width:7px; height:7px; border-radius:50%; background:var(--muted); flex:none; }
+    .sync-dot.synced   { background:var(--green); }
+    .sync-dot.syncing  { background:var(--carb);  animation:sync-pulse 1s ease-in-out infinite; }
+    .sync-dot.error    { background:var(--red);   }
+    .sync-dot.offline  { background:var(--muted); }
+    @keyframes sync-pulse { 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+    @media (max-width:560px) { .sync-pill .sync-text { display:none; } }
+
+    /* A build you can accidentally leave yourself in needs to be impossible to
+       mistake for the real thing. */
+    .env-banner {
+      display:flex; align-items:center; justify-content:center; gap:10px;
+      padding:6px 12px; padding-top:calc(6px + env(safe-area-inset-top));
+      background:linear-gradient(90deg,#7c3aed,#a855f7); color:#fff;
+      font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;
+      flex:none;
+    }
+    .env-banner button {
+      background:rgba(255,255,255,0.18); color:#fff; padding:3px 10px;
+      border-radius:999px; font-size:10px; font-weight:800; letter-spacing:0.06em;
+    }
+    .env-banner button:hover { background:rgba(255,255,255,0.32); }
+    /* The banner is a sibling of .app, so .app has to yield its fixed height. */
+    #root { display:flex; flex-direction:column; }
+    .env-banner + .app { height:auto; flex:1; min-height:0; }
+    body.is-dev { --accent:#8b5cf6; }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div style="font-size:12px;color:#8b92b5;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Loading…</div>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+  const { useState, useEffect, useRef } = React;
+
+  // Must run before any component reads storage — it resolves the environment
+  // and starts restoring the session.
+  FTSync.init();
+  if (FTSync.isDev) document.body.classList.add('is-dev');
+
+  const ymd = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  const TODAY = ymd(new Date());
+  const MEAL_TYPES = ['Breakfast','Lunch','Dinner','Snack'];
+  const M_COLOR = { Breakfast:'#fbbf24', Lunch:'#34d399', Dinner:'#a78bfa', Snack:'#fb923c' };
+
+  const DEFAULT_GOALS = { calories:1800, protein:175, carbs:80, fat:70, fiber:25, water:128 };
+
+  const WORKOUT_PRESETS = [
+    { name:'Weight Training', cpm:6  },
+    { name:'Running',         cpm:11 },
+    { name:'Cycling',         cpm:8  },
+    { name:'HIIT',            cpm:13 },
+    { name:'Walking',         cpm:4  },
+    { name:'Swimming',        cpm:9  },
+  ];
+
+  const SAMPLE_LIBRARY = [
+    { id:1,  name:'Scrambled Eggs (2 large)',  calories:180, protein:12, carbs:2,  fat:13, fiber:0, grams:100, servingQty:100, servingUnit:'g', servingSize:'100g' },
+    { id:2,  name:'Greek Yogurt (plain, 0%)',  calories:120, protein:17, carbs:9,  fat:0,  fiber:0, grams:227, servingQty:227, servingUnit:'g', servingSize:'227g' },
+    { id:3,  name:'Cottage Cheese',            calories:110, protein:13, carbs:4,  fat:2,  fiber:0, grams:113, servingQty:113, servingUnit:'g', servingSize:'113g' },
+    { id:4,  name:'Chicken Breast (grilled)',  calories:165, protein:31, carbs:0,  fat:3,  fiber:0, grams:113, servingQty:113, servingUnit:'g', servingSize:'113g' },
+    { id:5,  name:'Ground Pork (cooked)',       calories:252, protein:22, carbs:0,  fat:18, fiber:0, grams:113, servingQty:113, servingUnit:'g', servingSize:'113g' },
+    { id:6,  name:'Sirloin Steak',              calories:207, protein:26, carbs:0,  fat:11, fiber:0, grams:113, servingQty:113, servingUnit:'g', servingSize:'113g' },
+    { id:7,  name:'Ground Beef 90/10',          calories:215, protein:26, carbs:0,  fat:12, fiber:0, grams:113, servingQty:113, servingUnit:'g', servingSize:'113g' },
+    { id:8,  name:'Protein Shake',              calories:150, protein:25, carbs:5,  fat:3,  fiber:1, grams:35,  servingQty:35,  servingUnit:'g', servingSize:'35g'  },
+    { id:9,  name:'Whole Milk',                 calories:150, protein:8,  carbs:12, fat:8,  fiber:0, grams:244, servingQty:244, servingUnit:'g', servingSize:'244g' },
+    { id:10, name:'Cheddar Cheese',             calories:110, protein:7,  carbs:0,  fat:9,  fiber:0, grams:28,  servingQty:28,  servingUnit:'g', servingSize:'28g'  },
+    { id:11, name:'Bacon (2 strips)',           calories:86,  protein:6,  carbs:0,  fat:7,  fiber:0, grams:23,  servingQty:23,  servingUnit:'g', servingSize:'23g'  },
+    { id:12, name:'Egg White (3)',              calories:52,  protein:11, carbs:1,  fat:0,  fiber:0, grams:99,  servingQty:99,  servingUnit:'g', servingSize:'99g'  },
+    { id:13, name:'Tuna (canned, water)',       calories:130, protein:28, carbs:0,  fat:1,  fiber:0, grams:142, servingQty:142, servingUnit:'g', servingSize:'142g' },
+    { id:14, name:'Salmon (baked)',             calories:175, protein:25, carbs:0,  fat:8,  fiber:0, grams:85,  servingQty:85,  servingUnit:'g', servingSize:'85g'  },
+    { id:15, name:'White Rice (cooked)',        calories:206, protein:4,  carbs:45, fat:0,  fiber:1, grams:186, servingQty:186, servingUnit:'g', servingSize:'186g' },
+    { id:16, name:'Broccoli (steamed)',         calories:55,  protein:4,  carbs:11, fat:0,  fiber:5, grams:91,  servingQty:91,  servingUnit:'g', servingSize:'91g'  },
+    { id:17, name:'Avocado (½)',                calories:120, protein:1,  carbs:6,  fat:11, fiber:5, grams:75,  servingQty:75,  servingUnit:'g', servingSize:'75g'  },
+    { id:18, name:'Almonds',                    calories:164, protein:6,  carbs:6,  fat:14, fiber:4, grams:28,  servingQty:28,  servingUnit:'g', servingSize:'28g'  },
+    { id:19, name:'Banana',                     calories:105, protein:1,  carbs:27, fat:0,  fiber:3, grams:118, servingQty:118, servingUnit:'g', servingSize:'118g' },
+    { id:20, name:'Oatmeal (plain, cooked)',    calories:166, protein:6,  carbs:32, fat:4,  fiber:4, grams:234, servingQty:234, servingUnit:'g', servingSize:'234g' },
+  ];
+
+  // ── UNIT HELPERS ─────────────────────────────────────────────────────────────
+  const UNITS = ['g','oz','lb','slice','piece','cup','tbsp','tsp','serving'];
+  const GRAM_CONV = {g:1, oz:28.3495, lb:453.592};
+  const toGrams = (qty,unit) => GRAM_CONV[unit] ? qty*GRAM_CONV[unit] : null;
+  const parseQtyUnit = s => {
+    if (!s) return {qty:'1',unit:'g'};
+    const m = String(s).trim().match(/^([0-9.]+)\s*(.+)?$/);
+    if (m) { const u=(m[2]||'').trim().toLowerCase(); return {qty:m[1], unit:UNITS.includes(u)?u:'g'}; }
+    return {qty:'1',unit:'g'};
+  };
+
+  const SUGGESTIONS = [
+    { label:'High Protein', name:'Cottage Cheese Bowl',         desc:'Cottage cheese, strawberries, crushed almonds',                cal:235, p:26, c:20, fat:6,  fiber:3, tags:['High Protein','Quick'] },
+    { label:'Low Carb',     name:'Brussels Sprouts & Chicken',  desc:'Grilled chicken, roasted Brussels sprouts, garlic, olive oil', cal:315, p:38, c:14, fat:11, fiber:6, tags:['High Protein','Low Carb'] },
+    { label:'Keto',         name:'Cottage Cheese Scramble',     desc:'3 eggs, cottage cheese, wilted spinach, black pepper',         cal:285, p:33, c:4,  fat:15, fiber:1, tags:['High Protein','Keto'] },
+    { label:'Low Carb',     name:'Steak & Brussels Hash',       desc:'Sirloin, sautéed Brussels sprouts & onions, eggs over-easy',  cal:410, p:44, c:14, fat:19, fiber:5, tags:['High Protein','Low Carb'] },
+    { label:'High Protein', name:'Protein Power Bowl',          desc:'Ground beef, cottage cheese, steamed broccoli, hot sauce',    cal:420, p:52, c:8,  fat:18, fiber:5, tags:['High Protein','Low Carb'] },
+    { label:'Low Carb',     name:'Brussels Sprouts & Bacon',    desc:'Roasted Brussels sprouts, bacon, balsamic glaze',             cal:220, p:12, c:16, fat:13, fiber:5, tags:['Low Carb'] },
+    { label:'Snack',        name:'Cottage Cheese Dip Plate',    desc:'Blended cottage cheese, herbs, bell pepper, cucumber',        cal:145, p:16, c:9,  fat:4,  fiber:4, tags:['High Protein','Snack'] },
+    { label:'Low Carb',     name:'Greek Yogurt Chicken Bowl',   desc:'Chicken, Greek yogurt sauce, cucumber, dill, lemon',          cal:295, p:42, c:8,  fat:8,  fiber:1, tags:['High Protein','Low Carb'] },
+    { label:'Keto',         name:'Egg & Cottage Cheese Bake',   desc:'4 eggs baked over cottage cheese, spinach, cherry tomatoes',  cal:310, p:36, c:6,  fat:16, fiber:2, tags:['High Protein','Keto'] },
+    { label:'High Protein', name:'Tuna & Brussels Stir-fry',   desc:'Tuna, roasted Brussels sprouts, soy sauce, sesame oil',       cal:255, p:34, c:12, fat:7,  fiber:5, tags:['High Protein','Low Carb'] },
+    { label:'Low Carb',     name:'Ground Pork Skillet',         desc:'Ground pork, zucchini, garlic, crushed red pepper',           cal:290, p:24, c:6,  fat:19, fiber:2, tags:['Low Carb'] },
+    { label:'Keto',         name:'Cottage Cheese & Salmon',     desc:'Cottage cheese alongside baked salmon, lemon, dill',          cal:295, p:38, c:4,  fat:13, fiber:0, tags:['High Protein','Keto'] },
+  ];
+
+  // ── UTILS ────────────────────────────────────────────────────────────────────
+  // Storage goes through FTSync: still local-first and synchronous, but each
+  // write is also queued to the cloud and namespaced by environment. With no
+  // cloud configured this is plain localStorage, exactly as before.
+  const load    = (k,d) => FTSync.load(k,d);
+  const save    = (k,v) => FTSync.save(k,v);
+  const fmtFull = d => new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const fmtShort= d => new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+  const addDays = (d,n) => { const dt=new Date(d+'T12:00:00'); dt.setDate(dt.getDate()+n); return ymd(dt); };
+  const daysUntil = d => { if(!d) return null; return Math.ceil((new Date(d+'T12:00:00')-new Date(TODAY+'T12:00:00'))/86400000); };
+  const totals  = meals => meals.reduce((a,m)=>({ calories:a.calories+(m.calories||0), protein:a.protein+(m.protein||0), carbs:a.carbs+(m.carbs||0), fat:a.fat+(m.fat||0), fiber:a.fiber+(m.fiber||0) }), {calories:0,protein:0,carbs:0,fat:0,fiber:0});
+  const burned  = wkts  => (wkts||[]).reduce((a,w)=>a+(w.caloriesBurned||0),0);
+  const pct     = (v,g) => Math.min(v/Math.max(g,1),1);
+  const scColor = (v,g,inv=false) => {
+    const p=v/Math.max(g,1);
+    if(inv){ if(p>1)return'#f87171'; if(p>0.9)return'#fb923c'; if(p>0.75)return'#fbbf24'; return'#34d399'; }
+    else    { if(p>1.05)return'#fb923c'; if(p>=0.8)return'#34d399'; if(p>=0.4)return'#6366f1'; return'#5c6285'; }
+  };
+  const fmt12 = t => {
+    if (!t) return '—';
+    const [h,m] = t.split(':').map(Number);
+    return `${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`;
+  };
+  const sleepQColor = h => h>=8?'var(--green)':h>=7?'var(--accent)':h>=6?'var(--carb)':'var(--red)';
+
+  // ── SVG ICONS ────────────────────────────────────────────────────────────────
+  const IcoDash = () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="2" y="2" width="7" height="7" rx="1.5"/>
+      <rect x="11" y="2" width="7" height="7" rx="1.5"/>
+      <rect x="2" y="11" width="7" height="7" rx="1.5"/>
+      <rect x="11" y="11" width="7" height="7" rx="1.5"/>
+    </svg>
+  );
+  const IcoHist = () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="3" y="2" width="14" height="16" rx="2"/>
+      <path d="M7 7h6M7 11h6M7 15h3" strokeLinecap="round"/>
+    </svg>
+  );
+  const IcoProf = () => (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="10" cy="7" r="3.5"/>
+      <path d="M3 18c0-3.866 3.134-7 7-7s7 3.134 7 7" strokeLinecap="round"/>
+    </svg>
+  );
+  const IcoChev = ({dir='right',size=16}) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {dir==='right' && <path d="M6 4l4 4-4 4"/>}
+      {dir==='left'  && <path d="M10 4l-4 4 4 4"/>}
+    </svg>
+  );
+  const IcoEdit = ({size=13}) => (
+    <svg width={size} height={size} viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <path d="M9 2l2 2L4 11H2V9L9 2z"/>
+    </svg>
+  );
+  const IcoX = ({size=12}) => (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M2 2l8 8M10 2l-8 8"/>
+    </svg>
+  );
+  const IcoPlus = ({size=13}) => (
+    <svg width={size} height={size} viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M6.5 2v9M2 6.5h9"/>
+    </svg>
+  );
+  const IcoSearch = ({size=14}) => (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="6" cy="6" r="4"/>
+      <path d="M10 10l2.5 2.5" strokeLinecap="round"/>
+    </svg>
+  );
+  const IcoCheck = ({size=11}) => (
+    <svg width={size} height={size} viewBox="0 0 11 11" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 5.5l2.5 2.5 4.5-5"/>
+    </svg>
+  );
+  const IcoWater = ({size=14}) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.3s5 5.2 5 8.7a5 5 0 11-10 0C3 6.5 8 1.3 8 1.3z"/></svg>
+  );
+  const IcoFlame = ({size=14}) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor"><path d="M8.5 1c.6 2.3-1.2 3.4-1.2 5 0 .8.4 1.4.9 1.9.3-.5.5-1 .5-1.7 1.4 1 2.3 2.5 2.3 4.1A4.5 4.5 0 113.4 8.7C4 6 6.2 4 8.5 1z"/></svg>
+  );
+  const IcoMoon = ({size=14}) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor"><path d="M13.6 9.7A5.6 5.6 0 016.3 2.4 5.6 5.6 0 1013.6 9.7z"/></svg>
+  );
+  const IcoScale = ({size=20}) => (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="3" y="3" width="14" height="14" rx="4"/><path d="M10 10l3-3" strokeLinecap="round"/><circle cx="10" cy="10" r="0.8" fill="currentColor" stroke="none"/>
+    </svg>
+  );
+  const IcoTarget = ({size=14}) => (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="7" r="5.5"/><circle cx="7" cy="7" r="2"/></svg>
+  );
+
+  // ── MEAL BADGE / RING / BAR ──────────────────────────────────────────────────
+  function MealBadge({ type, size=38 }) {
+    const color = M_COLOR[type]||'#6366f1';
+    const letter = (type||'?')[0];
+    return (
+      <div className="meal-badge" style={{
+        width:size, height:size, borderRadius:Math.round(size*0.28),
+        background:`${color}1f`, border:`1.5px solid ${color}38`,
+        color, fontSize:Math.round(size*0.4), flexShrink:0,
+      }}>{letter}</div>
+    );
+  }
+
+  function Ring({ value, max, color, size=110, stroke=9, children }) {
+    const r=(size-stroke*2)/2, circ=2*Math.PI*r, off=circ*(1-Math.min(value/Math.max(max,1),1));
+    return (
+      <div className="ring-wrap" style={{width:size,height:size}}>
+        <svg width={size} height={size} style={{transform:'rotate(-90deg)',display:'block'}}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke}/>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+            strokeDasharray={circ} strokeDashoffset={off}
+            style={{transition:'stroke-dashoffset 0.6s cubic-bezier(0.4,0,0.2,1)',filter:`drop-shadow(0 0 6px ${color}55)`}}/>
+        </svg>
+        <div className="ring-center">{children}</div>
+      </div>
+    );
+  }
+
+  function Bar({ value, max, color, height=7 }) {
+    const p=Math.min(value/Math.max(max,1),1)*100;
+    return <div className="bar-track" style={{height}}><div className="bar-fill" style={{width:`${p}%`,background:color,height}}/></div>;
+  }
+
+  // ── ADD FOOD MODAL ───────────────────────────────────────────────────────────
+  function AddFoodModal({ foodLibrary, onSave, onAddToLibrary, onRemoveFromLibrary, onClose, initialMeal }) {
+    const isEditing = !!initialMeal;
+    const inLib = nm => foodLibrary.some(f => (f.name||'').trim().toLowerCase() === (nm||'').trim().toLowerCase());
+    const qs = initialMeal?.servingSize ? parseQtyUnit(initialMeal.servingSize) : {qty:'1', unit:'g'};
+    const [search,   setSearch]   = useState('');
+    const [baseFood, setBaseFood] = useState(null);
+    const [form, setForm] = useState({
+      name:     initialMeal?.name     || '',
+      mealType: initialMeal?.mealType || 'Breakfast',
+      calories: initialMeal?.calories != null ? String(initialMeal.calories) : '',
+      protein:  initialMeal?.protein  != null ? String(initialMeal.protein)  : '',
+      carbs:    initialMeal?.carbs    != null ? String(initialMeal.carbs)    : '',
+      fat:      initialMeal?.fat      != null ? String(initialMeal.fat)      : '',
+      fiber:    initialMeal?.fiber    != null ? String(initialMeal.fiber)    : '',
+      qty:  qs.qty,
+      unit: qs.unit,
+    });
+    const [saveToLib, setSaveToLib] = useState(isEditing ? inLib(initialMeal?.name) : true);
+    const searchRef = useRef(null);
+    useEffect(() => { if(searchRef.current) searchRef.current.focus(); }, []);
+
+    useEffect(() => {
+      if (!baseFood || !form.qty || !parseFloat(form.qty)) return;
+      const inputQty = parseFloat(form.qty);
+      const inputG   = toGrams(inputQty, form.unit);
+      const baseG    = baseFood.grams;
+      let ratio;
+      if (inputG !== null && baseG) {
+        ratio = inputG / baseG;
+      } else if (form.unit === (baseFood.servingUnit || 'g')) {
+        ratio = inputQty / (baseFood.servingQty || baseG || 1);
+      } else { return; }
+      setForm(f => ({
+        ...f,
+        calories: String(Math.round(baseFood.calories * ratio)),
+        protein:  String(+(baseFood.protein  * ratio).toFixed(1)),
+        carbs:    String(+(baseFood.carbs    * ratio).toFixed(1)),
+        fat:      String(+(baseFood.fat      * ratio).toFixed(1)),
+        fiber:    String(+((baseFood.fiber||0) * ratio).toFixed(1)),
+      }));
+    }, [form.qty, form.unit, baseFood]); // eslint-disable-line
+
+    const results = search.trim().length > 0
+      ? foodLibrary.filter(f => f.name.toLowerCase().includes(search.toLowerCase())).slice(0,6)
+      : [];
+
+    const prefill = food => {
+      const sq = food.servingQty || food.grams || 1;
+      const su = food.servingUnit || (food.grams ? 'g' : 'serving');
+      setForm(f => ({ ...f, name:food.name, calories:String(food.calories), protein:String(food.protein),
+        carbs:String(food.carbs), fat:String(food.fat), fiber:String(food.fiber||0),
+        qty:String(sq), unit:su }));
+      setBaseFood((food.grams||food.servingQty) ? {...food, servingQty:sq, servingUnit:su} : null);
+      setSearch('');
+    };
+
+    const quickAdd = food => {
+      const inputQty = parseFloat(form.qty)||1;
+      const inputG   = toGrams(inputQty, form.unit);
+      let ratio = 1;
+      if (inputG !== null && food.grams)  ratio = inputG / food.grams;
+      else if (form.unit === (food.servingUnit||'g') && food.servingQty) ratio = inputQty / food.servingQty;
+      const sc = v => Math.round((v||0) * ratio * 10) / 10;
+      onSave({ id:Date.now(), name:food.name, mealType:form.mealType,
+        calories:sc(food.calories), protein:sc(food.protein), carbs:sc(food.carbs),
+        fat:sc(food.fat), fiber:sc(food.fiber||0),
+        servingSize:`${inputQty} ${form.unit}`, addedAt:new Date().toISOString() });
+    };
+
+    const s = k => e => setForm(f=>({...f,[k]:e.target.value}));
+    const n = k => e => setForm(f=>({...f,[k]:e.target.value.replace(/[^0-9.]/g,'')}));
+    const valid = form.name.trim() && form.calories !== '';
+
+    const doSave = () => {
+      if (!valid) return;
+      const nm  = form.name.trim();
+      const qty = parseFloat(form.qty)||1;
+      const meal = {
+        id:Date.now(), name:nm, mealType:form.mealType,
+        calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
+        carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
+        fiber:parseFloat(form.fiber)||0,
+        servingSize:`${qty} ${form.unit}`,
+        addedAt:new Date().toISOString(),
+      };
+      if (saveToLib && !baseFood) {
+        const gramsVal = toGrams(qty, form.unit);
+        onAddToLibrary({
+          name:nm, id:Date.now()+1,
+          calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
+          carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
+          fiber:parseFloat(form.fiber)||0,
+          servingQty:qty, servingUnit:form.unit,
+          grams:gramsVal,
+          servingSize:`${qty} ${form.unit}`,
+        });
+      } else if (!saveToLib && inLib(nm) && onRemoveFromLibrary) {
+        onRemoveFromLibrary(nm);
+      }
+      onSave(meal);
+    };
+
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">{isEditing ? 'Edit Food' : 'Log Food'}</div>
+
+          <div className="field">
+            <div className="field-lbl">Meal</div>
+            <div className="meal-type-grid">
+              {MEAL_TYPES.map(t => {
+                const col = M_COLOR[t];
+                return (
+                  <button key={t} className={`mt-btn ${form.mealType===t?'sel':''}`}
+                    onClick={() => setForm(f=>({...f,mealType:t}))}>
+                    <div className="mt-dot" style={{background: form.mealType===t ? col : 'var(--border2)'}}/>
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {!isEditing && <>
+            <div className="field">
+              <div className="field-lbl">Search Saved Foods</div>
+              <div className="lib-search-wrap">
+                <span className="lib-search-icon"><IcoSearch size={14}/></span>
+                <input ref={searchRef} className="input lib-search" placeholder="Search your food database…"
+                  value={search} onChange={e => setSearch(e.target.value)} />
+              </div>
+              {results.length > 0 && (
+                <div className="lib-results">
+                  {results.map(food => (
+                    <div key={food.id} className="lib-result">
+                      <div onClick={() => prefill(food)} style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <div className="lib-result-name">{food.name}</div>
+                          {food.grams && <span style={{fontSize:9,fontWeight:800,color:'var(--fiber)',background:'rgba(52,211,153,0.13)',padding:'1px 6px',borderRadius:999,letterSpacing:'0.03em'}}>per g</span>}
+                        </div>
+                        <div className="lib-result-macros">P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g{food.grams?` · base ${food.grams}g`:''}{food.servingSize?' · '+food.servingSize:''}</div>
+                      </div>
+                      <div className="lib-result-cal">{food.calories}</div>
+                      <button className="lib-result-add" onClick={() => quickAdd(food)}>Add</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {search.trim().length > 0 && results.length === 0 && (
+                <div style={{fontSize:11,color:'var(--muted)',padding:'8px 0'}}>No matches — fill in the form below.</div>
+              )}
+            </div>
+            <div className="divider"><div className="divider-lbl"><span>Or Enter Manually</span></div></div>
+          </>}
+
+          <div className="field">
+            <div className="field-lbl">Food Name</div>
+            <input className="input" placeholder="e.g. Chicken Breast" value={form.name} onChange={s('name')}
+              ref={isEditing ? searchRef : null}/>
+          </div>
+
+          <div className="field">
+            {baseFood && (() => {
+              const iG = toGrams(parseFloat(form.qty)||0, form.unit);
+              const hint = iG !== null && baseFood.grams
+                ? `${Math.round(iG)}g of ${baseFood.grams}g base · auto-scales`
+                : 'auto-scales macros';
+              return (
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:7}}>
+                  <div className="field-lbl" style={{marginBottom:0}}>Amount</div>
+                  <div style={{fontSize:9,color:'var(--fiber)',fontWeight:700}}>{hint}</div>
+                </div>
+              );
+            })()}
+            {!baseFood && <div className="field-lbl">Amount</div>}
+            <div style={{display:'flex',gap:10}}>
+              <input className="input" type="number" inputMode="decimal" placeholder="1"
+                value={form.qty} onChange={n('qty')} style={{flex:'2 1 0'}}/>
+              <select className="unit-select" value={form.unit}
+                onChange={e => setForm(f=>({...f,unit:e.target.value}))}>
+                <option value="g">g</option>
+                <option value="oz">oz</option>
+                <option value="lb">lb</option>
+                <option value="slice">slice</option>
+                <option value="piece">piece</option>
+                <option value="cup">cup</option>
+                <option value="tbsp">tbsp</option>
+                <option value="tsp">tsp</option>
+                <option value="serving">serving</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field-lbl">Calories</div>
+            <input className="input" type="number" inputMode="decimal" placeholder="0" value={form.calories} onChange={n('calories')}/>
+          </div>
+
+          <div className="row4">
+            <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.protein} onChange={n('protein')}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--carb)'}}>Carbs g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.carbs} onChange={n('carbs')}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--fat)'}}>Fat g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.fat} onChange={n('fat')}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--fiber)'}}>Fiber g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.fiber} onChange={n('fiber')}/></div>
+          </div>
+
+          {!isEditing && (
+            <div className="save-toggle" onClick={() => setSaveToLib(v=>!v)}>
+              <div className={`save-toggle-box ${saveToLib?'checked':''}`}>{saveToLib && <IcoCheck size={11}/>}</div>
+              <div>
+                <div className="save-toggle-label">Save to My Foods database</div>
+                <div style={{fontSize:11,color:'var(--muted)',fontWeight:500,marginTop:2}}>
+                  {saveToLib ? 'Saves so you can find and scale it later' : 'One-time log — not added to your database'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" disabled={!valid} onClick={doSave}>{isEditing ? 'Save Changes' : 'Add Food'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── WORKOUT MODAL ────────────────────────────────────────────────────────────
+  function WorkoutModal({ onSave, onClose }) {
+    const [preset, setPreset] = useState(null);
+    const [name, setName] = useState('');
+    const [duration, setDuration] = useState('');
+    const [kcal, setKcal] = useState('');
+
+    const selectPreset = p => {
+      setPreset(p); setName(p.name);
+      if (duration) setKcal(String(Math.round(parseFloat(duration) * p.cpm)));
+    };
+    const onDurChange = e => {
+      const v = e.target.value.replace(/[^0-9]/g,'');
+      setDuration(v);
+      if (preset && v) setKcal(String(Math.round(parseFloat(v) * preset.cpm)));
+    };
+    const valid = name.trim() && kcal && parseFloat(kcal) > 0;
+
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Log Workout</div>
+          <div className="field">
+            <div className="field-lbl">Activity</div>
+            <div className="workout-preset-grid">
+              {WORKOUT_PRESETS.map(p => (
+                <button key={p.name} className={`wp-btn ${preset?.name===p.name?'sel':''}`} onClick={() => selectPreset(p)}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-lbl">Custom name</div>
+            <input className="input" placeholder="e.g. Basketball, Martial Arts…" value={name}
+              onChange={e => { setName(e.target.value); setPreset(null); }}/>
+          </div>
+          <div className="row2">
+            <div className="field">
+              <div className="field-lbl">Duration (min)</div>
+              <input className="input" type="number" inputMode="numeric" placeholder="30" value={duration} onChange={onDurChange}/>
+            </div>
+            <div className="field">
+              <div className="field-lbl" style={{color:'var(--green)'}}>Calories Burned</div>
+              <input className="input" type="number" inputMode="numeric" placeholder="200"
+                value={kcal} onChange={e => setKcal(e.target.value.replace(/[^0-9]/g,''))}/>
+            </div>
+          </div>
+          {preset && duration && <div style={{fontSize:11,color:'var(--muted)',marginBottom:8}}>Auto-estimated from {preset.name} — adjust if needed.</div>}
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" style={{background:'var(--green)',boxShadow:'0 4px 14px -3px rgba(52,211,153,0.5)'}} disabled={!valid}
+              onClick={() => onSave({ id:Date.now(), name:name.trim(), duration:parseFloat(duration)||0, caloriesBurned:parseFloat(kcal)||0 })}>
+              Save Workout
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function LogWeightModal({ current, onSave, onClose }) {
+    const nowTime = new Date().toTimeString().slice(0,5);
+    const [val,  setVal]  = useState(current ? String(current) : '');
+    const [time, setTime] = useState(nowTime);
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Log Weight</div>
+          <div className="row2">
+            <div className="field">
+              <div className="field-lbl">Weight (lbs)</div>
+              <input className="input" type="number" inputMode="decimal" placeholder="183.5"
+                value={val} onChange={e => setVal(e.target.value.replace(/[^0-9.]/g,''))} autoFocus/>
+            </div>
+            <div className="field">
+              <div className="field-lbl">Time</div>
+              <input className="input" type="time" value={time} onChange={e => setTime(e.target.value)}/>
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => val && onSave({weight:parseFloat(val), time})}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function WaterModal({ onSave, onClose }) {
+    const [val, setVal] = useState('');
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Add Water</div>
+          <div className="field">
+            <div className="field-lbl">Amount (oz)</div>
+            <input className="input" type="number" inputMode="decimal" placeholder="20"
+              value={val} onChange={e => setVal(e.target.value.replace(/[^0-9.]/g,''))} autoFocus/>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => val && onSave(parseFloat(val))}>Add</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function SleepModal({ onSave, onClose }) {
+    const [bedDate,  setBedDate]  = useState(TODAY);
+    const [bedTime,  setBedTime]  = useState('22:00');
+    const [wakeTime, setWakeTime] = useState('07:00');
+
+    const calcSleep = () => {
+      const [bh,bm] = bedTime.split(':').map(Number);
+      const [wh,wm] = wakeTime.split(':').map(Number);
+      const bedMins  = bh*60+bm, wakeMins = wh*60+wm;
+      const cross    = wakeMins <= bedMins;
+      const wakeDate = cross ? addDays(bedDate,1) : bedDate;
+      const hours    = cross ? (1440-bedMins+wakeMins)/60 : (wakeMins-bedMins)/60;
+      return { wakeDate, hours: Math.max(0, hours) };
+    };
+
+    const { wakeDate, hours } = calcSleep();
+    const color = sleepQColor(hours);
+
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Log Sleep</div>
+          <div className="sleep-hours-preview">
+            <div className="sleep-hours-big" style={{color}}>{hours.toFixed(1)}h</div>
+            <div className="sleep-hours-sub">
+              {fmt12(bedTime)} → {fmt12(wakeTime)}
+              {bedDate !== wakeDate && ' · wakes next day'}
+            </div>
+          </div>
+          <div className="row2">
+            <div className="field">
+              <div className="field-lbl">Bedtime Date</div>
+              <input className="input" type="date" value={bedDate} onChange={e=>setBedDate(e.target.value)}/>
+            </div>
+            <div className="field">
+              <div className="field-lbl">Bedtime</div>
+              <input className="input" type="time" value={bedTime} onChange={e=>setBedTime(e.target.value)}/>
+            </div>
+          </div>
+          <div className="field">
+            <div className="field-lbl">Wake Time</div>
+            <input className="input" type="time" value={wakeTime} onChange={e=>setWakeTime(e.target.value)}/>
+            {bedDate !== wakeDate && <div style={{fontSize:11,color:'var(--muted)',marginTop:5}}>Waking on {fmtShort(wakeDate)}</div>}
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" style={{background:'var(--prot)',boxShadow:'0 4px 14px -3px rgba(167,139,250,0.5)'}}
+              onClick={() => onSave({id:Date.now(), bedDate, bedTime, wakeDate, wakeTime, hours})}>
+              Save Sleep
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function EditGoalsModal({ goals, onSave, onClose }) {
+    const [f, setF] = useState({...goals});
+    const n = k => e => setF(v=>({...v,[k]:parseFloat(e.target.value)||0}));
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Edit Goals</div>
+          <div className="row2"><div className="field" style={{flex:1}}>
+            <div className="field-lbl" style={{color:'var(--cal)'}}>Calories (kcal)</div>
+            <input className="input" type="number" inputMode="decimal" value={f.calories||0} onChange={n('calories')}/>
+          </div><div className="field" style={{flex:1}}>
+            <div className="field-lbl" style={{color:'var(--water)'}}>Water (oz)</div>
+            <input className="input" type="number" inputMode="decimal" value={f.water||0} onChange={n('water')}/>
+          </div></div>
+          <div className="row4">
+            {[['protein','Protein','var(--prot)'],['carbs','Carbs','var(--carb)'],['fat','Fat','var(--fat)'],['fiber','Fiber','var(--fiber)']].map(([k,l,c])=>(
+              <div className="field" key={k}>
+                <div className="field-lbl" style={{color:c}}>{l} g</div>
+                <input className="input" type="number" inputMode="decimal" value={f[k]||0} onChange={n(k)}/>
+              </div>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => onSave(f)}>Save Goals</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function EditProfileModal({ profile, onSave, onClose }) {
+    const [f, setF] = useState({...profile});
+    const s = k => e => setF(v=>({...v,[k]:e.target.value}));
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Edit Profile</div>
+          <div className="field"><div className="field-lbl">Name</div><input className="input" placeholder="Your name" value={f.name||''} onChange={s('name')}/></div>
+          <div className="row2">
+            <div className="field"><div className="field-lbl">Height (ft)</div><input className="input" type="number" value={f.heightFt||5} onChange={s('heightFt')}/></div>
+            <div className="field"><div className="field-lbl">Height (in)</div><input className="input" type="number" value={f.heightIn||10} onChange={s('heightIn')}/></div>
+          </div>
+          <div className="row2">
+            <div className="field"><div className="field-lbl">Current Weight</div><input className="input" type="number" inputMode="decimal" value={f.currentWeight||''} onChange={s('currentWeight')}/></div>
+            <div className="field"><div className="field-lbl">Start Weight</div><input className="input" type="number" inputMode="decimal" value={f.startWeight||''} onChange={s('startWeight')}/></div>
+          </div>
+          <div className="row2">
+            <div className="field"><div className="field-lbl">Target Weight</div><input className="input" type="number" inputMode="decimal" value={f.targetWeight||''} onChange={s('targetWeight')}/></div>
+            <div className="field"><div className="field-lbl">Target Date</div><input className="input" type="date" value={f.targetDate||''} onChange={s('targetDate')}/></div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => onSave(f)}>Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function EditFoodModal({ food, onSave, onClose }) {
+    const [form, setForm] = useState({
+      name:food.name, calories:food.calories, protein:food.protein,
+      carbs:food.carbs, fat:food.fat, fiber:food.fiber||0, servingSize:food.servingSize||'',
+    });
+    const set = (k, v) => setForm(f => ({...f, [k]: v}));
+    const valid = form.name.trim().length > 0 && Number(form.calories) >= 0;
+    const handleSave = () => {
+      if (!valid) return;
+      onSave({ ...food, name:form.name.trim(),
+        calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
+        carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
+        fiber:parseFloat(form.fiber)||0, servingSize:form.servingSize.trim() });
+      onClose();
+    };
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Edit Food</div>
+          <div className="field">
+            <div className="field-lbl">Name</div>
+            <input className="input" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Food name"/>
+          </div>
+          <div className="row2">
+            <div className="field"><div className="field-lbl">Calories</div><input className="input" type="number" min="0" value={form.calories} onChange={e=>set('calories',e.target.value)}/></div>
+            <div className="field"><div className="field-lbl">Serving Size</div><input className="input" value={form.servingSize} onChange={e=>set('servingSize',e.target.value)} placeholder="e.g. 1 cup"/></div>
+          </div>
+          <div className="row4">
+            <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" min="0" value={form.protein} onChange={e=>set('protein',e.target.value)}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--carb)'}}>Carbs g</div><input className="input" type="number" min="0" value={form.carbs} onChange={e=>set('carbs',e.target.value)}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--fat)'}}>Fat g</div><input className="input" type="number" min="0" value={form.fat} onChange={e=>set('fat',e.target.value)}/></div>
+            <div className="field"><div className="field-lbl" style={{color:'var(--fiber)'}}>Fiber g</div><input className="input" type="number" min="0" value={form.fiber} onChange={e=>set('fiber',e.target.value)}/></div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={!valid}>Save Changes</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function LogLibraryFoodModal({ food, onLog, onClose }) {
+    const [mealType, setMealType] = useState('Breakfast');
+    const [servings, setServings] = useState('1');
+    const sv = Math.max(parseFloat(servings) || 1, 0.01);
+    const sc = v => Math.round((v || 0) * sv * 10) / 10;
+    const handleLog = () => {
+      onLog({ id: Date.now(), name: food.name, mealType,
+        calories: sc(food.calories), protein: sc(food.protein),
+        carbs: sc(food.carbs), fat: sc(food.fat), fiber: sc(food.fiber || 0),
+        servingSize: food.servingSize || '', addedAt: new Date().toISOString() });
+      onClose();
+    };
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div className="modal-title">Log Food</div>
+          <div style={{marginBottom:14,padding:'13px 14px',background:'var(--card2)',borderRadius:'var(--rs)',border:'1px solid var(--border)'}}>
+            <div style={{fontWeight:800,fontSize:14,marginBottom:5}}>{food.name}</div>
+            <div style={{fontSize:11,color:'var(--muted)'}}>Per serving{food.servingSize?` (${food.servingSize})`:''}: {food.calories} cal · P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g</div>
+          </div>
+          <div className="field">
+            <div className="field-lbl">Meal</div>
+            <div className="meal-type-grid">
+              {MEAL_TYPES.map(t => (
+                <button key={t} className={`mt-btn ${mealType===t?'sel':''}`} onClick={() => setMealType(t)}>
+                  <div className="mt-dot" style={{background: mealType===t ? M_COLOR[t] : 'var(--border2)'}}/>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="row2">
+            <div className="field" style={{flex:1}}>
+              <div className="field-lbl">Servings</div>
+              <input className="input" type="number" min="0.25" step="0.25" value={servings}
+                onChange={e => setServings(e.target.value.replace(/[^0-9.]/g,''))}/>
+            </div>
+            <div className="field" style={{flex:1}}>
+              <div className="field-lbl">Total Calories</div>
+              <div style={{padding:'12px 13px',background:'var(--card2)',border:'1.5px solid var(--border)',borderRadius:'var(--rs)',fontSize:18,fontWeight:800,color:'var(--cal)',letterSpacing:'-0.02em'}}>{sc(food.calories)}</div>
+            </div>
+          </div>
+          {sv !== 1 && (
+            <div style={{fontSize:11,color:'var(--muted)',marginBottom:10,padding:'9px 13px',background:'var(--card2)',borderRadius:'var(--rs)',border:'1px solid var(--border)'}}>
+              Totals: P {sc(food.protein)}g · C {sc(food.carbs)}g · F {sc(food.fat)}g · Fi {sc(food.fiber||0)}g
+            </div>
+          )}
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleLog}>Log to Today</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function FoodLibraryModal({ library, onDelete, onEdit, onLog, onClose }) {
+    const [search, setSearch] = useState('');
+    const [editingFood, setEditingFood] = useState(null);
+    const [loggingFood, setLoggingFood] = useState(null);
+    const filtered = search.trim() ? library.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : library;
+    return (
+      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+        <div className="modal">
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+            <div className="modal-title" style={{marginBottom:0}}>My Foods ({library.length})</div>
+            <button className="btn btn-ghost btn-sm" onClick={onClose}>Done</button>
+          </div>
+          <div className="lib-search-wrap" style={{marginBottom:12}}>
+            <span className="lib-search-icon"><IcoSearch size={14}/></span>
+            <input className="input lib-search" placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          </div>
+          {filtered.length === 0
+            ? <div style={{padding:'28px 0',textAlign:'center',color:'var(--muted)',fontSize:13}}>No foods found</div>
+            : <div className="card">
+                {filtered.map(food => (
+                  <div key={food.id} className="lib-food-row">
+                    <div className="lib-food-info">
+                      <div className="lib-food-name">{food.name}</div>
+                      <div className="lib-food-macros">P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g{food.servingSize?' · '+food.servingSize:''}</div>
+                    </div>
+                    <div className="lib-food-cal">{food.calories}</div>
+                    <button className="icon-btn" style={{background:'rgba(52,211,153,0.1)',color:'var(--green)'}} onClick={() => setLoggingFood(food)} title="Log food"><IcoPlus size={13}/></button>
+                    <button className="icon-btn icon-btn-edit" onClick={() => setEditingFood(food)}><IcoEdit size={13}/></button>
+                    <button className="icon-btn icon-btn-del" onClick={() => onDelete(food.id)}><IcoX size={12}/></button>
+                  </div>
+                ))}
+              </div>
+          }
+        </div>
+        {editingFood  && <EditFoodModal food={editingFood} onSave={f=>{onEdit(f);setEditingFood(null);}} onClose={()=>setEditingFood(null)}/>}
+        {loggingFood  && <LogLibraryFoodModal food={loggingFood} onLog={f=>{onLog(f);setLoggingFood(null);}} onClose={()=>setLoggingFood(null)}/>}
+      </div>
+    );
+  }
+
+  // ── WEIGHT CHART ─────────────────────────────────────────────────────────────
+  function WeightChart({ logs, targetWeight }) {
+    if (!logs || logs.length < 2) return (
+      <div className="chart-card">
+        <div className="section-label" style={{marginBottom:8}}>Weight Trend</div>
+        <div style={{padding:'32px 0',textAlign:'center',color:'var(--muted)',fontSize:12}}>Log 2+ weight entries to see your trend</div>
+      </div>
+    );
+    const sorted = [...logs].sort((a,b) => (a.date+':'+(a.time||'')).localeCompare(b.date+':'+(b.time||'')));
+    const ws = sorted.map(e=>e.weight);
+    const minW = Math.floor(Math.min(...ws)-3), maxW = Math.ceil(Math.max(...ws)+3);
+    const PL=38,PR=10,PT=12,PB=24, W=320,H=120;
+    const cW=W-PL-PR, cH=H-PT-PB;
+    const xOf = i => PL+(i/(sorted.length-1||1))*cW;
+    const yOf = w => PT+cH-((w-minW)/(maxW-minW||1))*cH;
+    const pts = sorted.map((e,i)=>[xOf(i),yOf(e.weight)]);
+    const linePoly = pts.map(([x,y])=>`${x},${y}`).join(' ');
+    const areaPoly = `${pts[0][0]},${PT+cH} `+pts.map(([x,y])=>`${x},${y}`).join(' ')+` ${pts[pts.length-1][0]},${PT+cH}`;
+    const step = Math.ceil((maxW-minW)/4)||1;
+    const yTicks = [];
+    for(let w=Math.ceil(minW/step)*step; w<=maxW; w+=step) yTicks.push(w);
+    const idxs = sorted.length<=4 ? sorted.map((_,i)=>i) : [0,Math.floor(sorted.length/2),sorted.length-1];
+    const tY = (targetWeight && targetWeight>=minW && targetWeight<=maxW) ? yOf(targetWeight) : null;
+    return (
+      <div className="chart-card">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div className="section-label" style={{marginBottom:0}}>Weight Trend</div>
+          <div style={{fontSize:10,color:'var(--muted)',fontWeight:600}}>{sorted.length} entries</div>
+        </div>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{overflow:'visible'}}>
+          <defs><linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity="0.3"/><stop offset="100%" stopColor="#6366f1" stopOpacity="0"/></linearGradient></defs>
+          {yTicks.map(w=>{const y=yOf(w);return(<g key={w}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1"/><text x={PL-5} y={y+4} fill="#8b92b5" fontSize="9" textAnchor="end" fontFamily="system-ui,sans-serif">{w}</text></g>);})}
+          {tY!==null && <line x1={PL} y1={tY} x2={W-PR} y2={tY} stroke="var(--green)" strokeWidth="1.5" strokeDasharray="5,4" opacity="0.75"/>}
+          <polygon points={areaPoly} fill="url(#wg2)"/>
+          <polyline points={linePoly} fill="none" stroke="#6366f1" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round"/>
+          {pts.map(([x,y],i)=><circle key={i} cx={x} cy={y} r="3.5" fill="#6366f1" stroke="var(--card)" strokeWidth="1.5"/>)}
+          {idxs.map(i=>{const lbl=new Date(sorted[i].date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});return <text key={i} x={xOf(i)} y={H-2} fill="#8b92b5" fontSize="8" textAnchor="middle" fontFamily="system-ui,sans-serif">{lbl}</text>;})}
+        </svg>
+        {targetWeight && <div style={{fontSize:10,color:'var(--green)',marginTop:6,fontWeight:600}}>— — Target: {targetWeight} lbs</div>}
+      </div>
+    );
+  }
+
+  function SleepChart({ logs }) {
+    const last7 = [...logs].sort((a,b)=>(b.bedDate+(b.bedTime||'')).localeCompare(a.bedDate+(a.bedTime||''))).slice(0,7).reverse();
+    if (last7.length===0) return (
+      <div className="chart-card">
+        <div className="section-label" style={{marginBottom:8}}>Sleep History</div>
+        <div style={{padding:'28px 0',textAlign:'center',color:'var(--muted)',fontSize:12}}>No sleep logged yet</div>
+      </div>
+    );
+    return (
+      <div className="chart-card">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <div className="section-label" style={{marginBottom:0}}>Sleep History</div>
+          <div style={{display:'flex',gap:8}}>
+            {[['var(--green)','≥8h'],['var(--accent)','≥7h'],['var(--carb)','≥6h'],['var(--red)','<6h']].map(([c,l])=>(
+              <span key={l} style={{display:'flex',alignItems:'center',gap:3,fontSize:8,color:'var(--muted)',fontWeight:700}}>
+                <span style={{width:6,height:6,borderRadius:'50%',background:c,display:'inline-block'}}/>{l}
+              </span>
+            ))}
+          </div>
+        </div>
+        {last7.map((s,i)=>{
+          const color=sleepQColor(s.hours);
+          const lbl=new Date(s.bedDate+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+          return (
+            <div key={s.id} style={{marginBottom:i===last7.length-1?0:11}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:5}}>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--text)'}}>{lbl}</div>
+                <div style={{fontSize:11,fontWeight:800,color}}>{s.hours.toFixed(1)}h · {fmt12(s.bedTime)} → {fmt12(s.wakeTime)}</div>
+              </div>
+              <div style={{height:6,background:'rgba(255,255,255,0.06)',borderRadius:999,overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${Math.min(s.hours/12,1)*100}%`,background:color,borderRadius:999,transition:'width 0.5s'}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── MEAL SUGGESTIONS ─────────────────────────────────────────────────────────
+  const TAG_STYLE = {
+    'High Protein': {bg:'rgba(167,139,250,0.14)',color:'var(--prot)'},
+    'Low Carb':     {bg:'rgba(52,211,153,0.14)', color:'var(--fiber)'},
+    'Keto':         {bg:'rgba(52,211,153,0.14)', color:'var(--fiber)'},
+    'Quick':        {bg:'rgba(251,191,36,0.14)', color:'var(--carb)'},
+    'Snack':        {bg:'rgba(251,146,60,0.14)', color:'var(--fat)'},
+  };
+  const LABEL_STYLE = {
+    'High Protein': {bg:'rgba(167,139,250,0.18)',color:'var(--prot)'},
+    'Low Carb':     {bg:'rgba(52,211,153,0.18)', color:'var(--fiber)'},
+    'Keto':         {bg:'rgba(52,211,153,0.18)', color:'var(--fiber)'},
+    'Snack':        {bg:'rgba(251,146,60,0.18)', color:'var(--fat)'},
+  };
+
+  function MealSuggestions({ onQuickAdd }) {
+    return (
+      <div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:11}}>
+          <div className="section-label" style={{marginBottom:0}}>Meal Ideas</div>
+          <div style={{fontSize:9,color:'var(--muted)',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.07em'}}>Scroll →</div>
+        </div>
+        <div className="sug-scroll">
+          {SUGGESTIONS.map((s,i) => {
+            const ls = LABEL_STYLE[s.label]||{bg:'rgba(99,102,241,0.18)',color:'var(--accent)'};
+            return (
+              <div key={i} className="sug-card">
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <span className="sug-label" style={{background:ls.bg,color:ls.color}}>{s.label}</span>
+                  <span className="sug-cal">{s.cal}</span>
+                </div>
+                <div className="sug-name">{s.name}</div>
+                <div className="sug-desc">{s.desc}</div>
+                <div className="sug-pills">
+                  <span className="pill" style={{background:'rgba(167,139,250,0.14)',color:'var(--prot)'}}>P {s.p}g</span>
+                  <span className="pill" style={{background:'rgba(251,191,36,0.14)',color:'var(--carb)'}}>C {s.c}g</span>
+                  <span className="pill" style={{background:'rgba(251,146,60,0.14)',color:'var(--fat)'}}>F {s.fat}g</span>
+                  {s.fiber > 0 && <span className="pill" style={{background:'rgba(52,211,153,0.14)',color:'var(--fiber)'}}>Fi {s.fiber}g</span>}
+                </div>
+                <div className="sug-tags">
+                  {s.tags.map(t => {
+                    const ts=TAG_STYLE[t]||{bg:'var(--card2)',color:'var(--muted)'};
+                    return <span key={t} className="sug-tag" style={{background:ts.bg,color:ts.color}}>{t}</span>;
+                  })}
+                </div>
+                <button className="sug-log-btn" onClick={() => onQuickAdd(s)}>+ Log This</button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── MEAL ROW ─────────────────────────────────────────────────────────────────
+  function MealRow({ meal, onDelete, onEdit }) {
+    const [confirming, setConfirming] = useState(false);
+    return (
+      <div className="meal-row">
+        <MealBadge type={meal.mealType} size={40}/>
+        <div className="meal-info">
+          <div className="meal-name">{meal.name}</div>
+          {meal.servingSize && <div className="meal-serving">{meal.servingSize}</div>}
+          <div className="meal-pills">
+            <span className="pill" style={{background:'rgba(167,139,250,0.14)',color:'var(--prot)'}}>P {meal.protein||0}g</span>
+            <span className="pill" style={{background:'rgba(251,191,36,0.14)',color:'var(--carb)'}}>C {meal.carbs||0}g</span>
+            <span className="pill" style={{background:'rgba(251,146,60,0.14)',color:'var(--fat)'}}>F {meal.fat||0}g</span>
+            {(meal.fiber||0) > 0 && <span className="pill" style={{background:'rgba(52,211,153,0.14)',color:'var(--fiber)'}}>Fi {meal.fiber}g</span>}
+          </div>
+        </div>
+        <div className="meal-cal-block">
+          <div className="meal-cal-num">{meal.calories}</div>
+          <div className="meal-cal-lbl">cal</div>
+        </div>
+        <button className="icon-btn icon-btn-edit" onClick={() => onEdit(meal)}><IcoEdit size={13}/></button>
+        <button className="icon-btn icon-btn-del"
+          onClick={() => { if(confirming){onDelete(meal.id);}else{setConfirming(true);setTimeout(()=>setConfirming(false),2500);} }}
+          style={confirming ? {background:'rgba(248,113,113,0.28)'} : {}}>
+          <IcoX size={12}/>
+        </button>
+      </div>
+    );
+  }
+
+  // ── DASHBOARD ────────────────────────────────────────────────────────────────
+  function DashboardView({ day, goals, foodLibrary, sleepLogs, onAddMeal, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
+    const [showWater, setShowWater] = useState(false);
+    const [showWorkout, setShowWorkout] = useState(false);
+    const [showSleep, setShowSleep] = useState(false);
+    const [editingMeal, setEditingMeal] = useState(null);
+    const [quickAddData, setQuickAddData] = useState(null);
+
+    const meals    = day.meals    || [];
+    const workouts = day.workouts || [];
+    const mac      = totals(meals);
+    const water    = day.waterOz  || 0;
+    const bur      = burned(workouts);
+    const budget   = goals.calories + bur;
+    const calRem   = budget - mac.calories;
+    const ringColor= scColor(mac.calories, budget);
+    const lastSleep = (sleepLogs||[]).length > 0
+      ? [...(sleepLogs||[])].sort((a,b)=>(b.bedDate+(b.bedTime||'')).localeCompare(a.bedDate+(a.bedTime||'')))[0]
+      : null;
+
+    return (
+      <div className="content">
+        <div className="dash-grid">
+          {/* ── LEFT: daily totals ── */}
+          <div className="dash-left">
+            <div className="card cal-card">
+              <div className="cal-ring-row">
+                <Ring value={mac.calories} max={budget} color={ringColor} size={168} stroke={14}>
+                  <div>
+                    <div className="ring-big" style={{color:ringColor}}>{Math.round(mac.calories)}</div>
+                    <div className="ring-sub">of {Math.round(budget)} kcal</div>
+                  </div>
+                </Ring>
+              </div>
+              <div className="cal-badge" style={{
+                color: calRem>=0 ? 'var(--green)' : 'var(--red)',
+                background: calRem>=0 ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
+                border:`1px solid ${calRem>=0?'rgba(52,211,153,0.22)':'rgba(248,113,113,0.22)'}`,
+              }}>
+                {calRem>=0 ? `${Math.round(calRem)} kcal remaining` : `${Math.round(-calRem)} kcal over`}
+              </div>
+              <div className="cal-stats">
+                <div className="cal-stat"><div className="cal-stat-val" style={{color:'var(--cal)'}}>{Math.round(mac.calories)}</div><div className="cal-stat-lbl">Eaten</div></div>
+                <div className="cal-stat"><div className="cal-stat-val" style={{color:'var(--green)'}}>{Math.round(bur)}</div><div className="cal-stat-lbl">Burned</div></div>
+                <div className="cal-stat"><div className="cal-stat-val" style={{color:calRem>=0?'var(--green)':'var(--red)'}}>{Math.round(Math.abs(calRem))}</div><div className="cal-stat-lbl">{calRem>=0?'Left':'Over'}</div></div>
+                <div className="cal-stat"><div className="cal-stat-val">{Math.round(budget)}</div><div className="cal-stat-lbl">Budget</div></div>
+              </div>
+            </div>
+
+            <div className="card macro-card">
+              <div className="section-label">Macronutrients</div>
+              <div className="macro-rings">
+                {[['Protein',mac.protein,goals.protein,'var(--prot)',false],
+                  ['Carbs',  mac.carbs,  goals.carbs,  'var(--carb)',true ],
+                  ['Fat',    mac.fat,    goals.fat,    'var(--fat)', false]].map(([lbl,val,goal,color,inv])=>{
+                  const r=goal-val, c=scColor(val,goal,inv);
+                  return (
+                    <div key={lbl} className="mc">
+                      <div className="mc-name" style={{color}}>{lbl}</div>
+                      <Ring value={val} max={goal} color={color} size={78} stroke={7}>
+                        <div>
+                          <div style={{fontSize:15,fontWeight:800,color,letterSpacing:'-0.02em'}}>{Math.round(val)}</div>
+                          <div style={{fontSize:9,color:'var(--muted)'}}>/ {goal}</div>
+                        </div>
+                      </Ring>
+                      <div className="mc-rem" style={{background:`${c}1f`,color:c}}>
+                        {r>=0 ? `${Math.round(r)}g left` : `${Math.round(-r)}g over`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{marginTop:18}}>
+                {(() => {
+                  const r=goals.fiber-mac.fiber, c=scColor(mac.fiber,goals.fiber,false);
+                  return (
+                    <div className="bar-row">
+                      <div className="bar-meta">
+                        <span className="bar-name" style={{color:'var(--fiber)'}}>Fiber</span>
+                        <span className="bar-nums">
+                          <span style={{fontWeight:700,color:c}}>{Math.round(mac.fiber)}g</span>
+                          <span style={{color:'var(--muted)'}}> / {goals.fiber}g · {r>=0?`${Math.round(r)}g left`:`${Math.round(-r)}g over`}</span>
+                        </span>
+                      </div>
+                      <Bar value={mac.fiber} max={goals.fiber} color={c} height={7}/>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* ── RIGHT: activity + meals ── */}
+          <div className="dash-right">
+            <div className="activity-grid">
+              {/* Water */}
+              <div className="mini-card">
+                <div className="mini-head">
+                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(56,189,248,0.13)',color:'var(--water)'}}><IcoWater/></span>Hydration</div>
+                  <div style={{fontSize:13,fontWeight:800,color:'var(--water)'}}>{Math.round(pct(water,goals.water)*100)}%</div>
+                </div>
+                <div><span className="water-num">{Math.round(water)}</span><span className="water-unit">/ {goals.water} oz</span></div>
+                <div style={{marginTop:11}}><Bar value={water} max={goals.water} color="var(--water)" height={8}/></div>
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:9,fontWeight:600}}>{water>=goals.water?'Daily goal reached' : `${Math.round(goals.water-water)} oz remaining`}</div>
+                <div className="water-btns">
+                  {[8,16,32].map(oz=><button key={oz} className="w-btn" onClick={()=>onAddWater(oz)}>+{oz}</button>)}
+                  <button className="w-custom" onClick={()=>setShowWater(true)}>···</button>
+                </div>
+              </div>
+
+              {/* Workouts */}
+              <div className="mini-card">
+                <div className="mini-head">
+                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(52,211,153,0.13)',color:'var(--green)'}}><IcoFlame/></span>Workouts</div>
+                </div>
+                <div><span className="burned-num">{bur > 0 ? `+${Math.round(bur)}` : '0'}</span> <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>kcal</span></div>
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:4,fontWeight:600}}>{bur > 0 ? 'Added to your budget' : 'No activity yet'}</div>
+                {workouts.length > 0 && <div style={{marginTop:6}}>{workouts.map(w => (
+                  <div key={w.id} className="workout-row">
+                    <div className="workout-dot"/>
+                    <div className="workout-info"><div className="workout-name">{w.name}</div>{w.duration > 0 && <div className="workout-detail">{w.duration} min</div>}</div>
+                    <div className="workout-kcal">+{w.caloriesBurned}</div>
+                    <button className="icon-btn icon-btn-del" style={{width:26,height:26}} onClick={()=>onDeleteWorkout(w.id)}><IcoX size={11}/></button>
+                  </div>
+                ))}</div>}
+                <button className="log-mini-btn green" onClick={()=>setShowWorkout(true)}><IcoPlus size={12}/> Log Workout</button>
+              </div>
+
+              {/* Sleep */}
+              <div className="mini-card">
+                <div className="mini-head">
+                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(167,139,250,0.13)',color:'var(--prot)'}}><IcoMoon/></span>Sleep</div>
+                </div>
+                {lastSleep
+                  ? <>
+                      <div><span className="sleep-num" style={{color:sleepQColor(lastSleep.hours)}}>{lastSleep.hours.toFixed(1)}</span> <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>hrs</span></div>
+                      <div className="sleep-lbl">{fmt12(lastSleep.bedTime)} → {fmt12(lastSleep.wakeTime)}</div>
+                    </>
+                  : <>
+                      <div><span className="sleep-num" style={{color:'var(--muted)'}}>—</span></div>
+                      <div className="sleep-lbl">No sleep logged</div>
+                    </>
+                }
+                <button className="log-mini-btn purple" onClick={()=>setShowSleep(true)}><IcoPlus size={12}/> Log Sleep</button>
+              </div>
+            </div>
+
+            {/* Meals */}
+            <div>
+              <div className="meals-bar">
+                <div className="meals-title">Today's Meals</div>
+                <button className="btn-accent" onClick={onOpenAddFood}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>
+              </div>
+              <div className="card">
+                {meals.length===0
+                  ? <div className="empty-state"><div className="empty-state-title">Nothing logged yet</div><div className="empty-state-sub">Tap "Log Food" to track your first meal</div></div>
+                  : MEAL_TYPES.map(type => {
+                      const group = meals.filter(m=>m.mealType===type);
+                      if (!group.length) return null;
+                      const gcal = Math.round(totals(group).calories);
+                      return (
+                        <div key={type}>
+                          <div className="meal-group-header">
+                            <div className="meal-group-dot" style={{background:M_COLOR[type]}}/>
+                            <div className="meal-group-name" style={{color:M_COLOR[type]}}>{type}</div>
+                            <div style={{marginLeft:'auto',fontSize:11,fontWeight:700,color:'var(--muted)'}}>{gcal} cal</div>
+                          </div>
+                          {group.map(m => <MealRow key={m.id} meal={m} onDelete={onDeleteMeal} onEdit={m=>setEditingMeal(m)}/>)}
+                        </div>
+                      );
+                    })
+                }
+              </div>
+            </div>
+
+            <MealSuggestions onQuickAdd={s => setQuickAddData({
+              name:s.name, mealType:'Snack', calories:s.cal,
+              protein:s.p, carbs:s.c, fat:s.fat, fiber:s.fiber, servingSize:s.desc
+            })} />
+          </div>
+        </div>
+
+        {showWater   && <WaterModal   onSave={oz=>{onAddWater(oz);setShowWater(false);}}  onClose={()=>setShowWater(false)}/>}
+        {showWorkout && <WorkoutModal onSave={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
+        {showSleep   && <SleepModal   onSave={s=>{onLogSleep(s);setShowSleep(false);}}     onClose={()=>setShowSleep(false)}/>}
+        {(editingMeal||quickAddData) && (
+          <AddFoodModal
+            foodLibrary={foodLibrary}
+            initialMeal={editingMeal||quickAddData}
+            onSave={meal => {
+              if (editingMeal) { onEditMeal(editingMeal.id, meal); setEditingMeal(null); }
+              else { onAddMeal(meal); setQuickAddData(null); }
+            }}
+            onAddToLibrary={onAddToLibrary}
+            onRemoveFromLibrary={onRemoveFromLibrary}
+            onClose={() => { setEditingMeal(null); setQuickAddData(null); }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── HISTORY ──────────────────────────────────────────────────────────────────
+  function HistoryView({ days, goals, onNavigate }) {
+    const last30 = Array.from({length:30}, (_,i) => addDays(TODAY, -(i+1)));
+    return (
+      <div className="content">
+        <div className="section-label">Past 30 Days</div>
+        <div className="hist-grid">
+          {last30.map(date => {
+            const day   = days[date] || {};
+            const meals = day.meals   || [];
+            const wkts  = day.workouts|| [];
+            const mac   = totals(meals);
+            const bur   = burned(wkts);
+            const hasData = meals.length > 0 || wkts.length > 0 || (day.waterOz||0) > 0 || day.weight;
+
+            if (!hasData) {
+              return (
+                <div key={date} className="hist-card hist-card-empty" onClick={() => onNavigate(date)}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div>
+                      <div className="hist-date">{fmtShort(date)}</div>
+                      <div className="hist-sub">No data logged</div>
+                    </div>
+                    <div className="hist-chevron"><IcoChev dir="right" size={14}/></div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div key={date} className="hist-card" onClick={() => onNavigate(date)}>
+                <div className="hist-head">
+                  <div>
+                    <div className="hist-date">{fmtShort(date)}</div>
+                    <div className="hist-sub">
+                      {meals.length} meal{meals.length!==1?'s':''}{bur>0?` · ${bur} kcal burned`:''}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    {day.weight && <div className="hist-weight">{day.weight} lbs</div>}
+                    <div className="hist-chevron"><IcoChev dir="right" size={14}/></div>
+                  </div>
+                </div>
+                <div className="hist-macros">
+                  {[['Cal',Math.round(mac.calories),'var(--cal)'],['Pro',Math.round(mac.protein)+'g','var(--prot)'],
+                    ['Crb',Math.round(mac.carbs)+'g','var(--carb)'],['Fat',Math.round(mac.fat)+'g','var(--fat)'],
+                    ['Fib',Math.round(mac.fiber)+'g','var(--fiber)'],['H₂O',Math.round(day.waterOz||0)+'oz','var(--water)']].map(([l,v,c])=>(
+                    <div key={l} className="hist-m">
+                      <div className="hist-m-val" style={{color:c}}>{v}</div>
+                      <div className="hist-m-lbl">{l}</div>
+                    </div>
+                  ))}
+                </div>
+                <Bar value={mac.calories} max={goals.calories+bur} color={scColor(mac.calories,goals.calories+bur)} height={5}/>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── PROFILE ──────────────────────────────────────────────────────────────────
+  function ProfileView({ profile, goals, days, foodLibrary, weightLogs, sleepLogs, onUpdateProfile, onUpdateGoals, onDeleteLibraryFood, onEditLibraryFood, onLogLibraryFood }) {
+    const [showEditProfile, setShowEditProfile] = useState(false);
+    const [showEditGoals,   setShowEditGoals]   = useState(false);
+    const [showLibrary,     setShowLibrary]     = useState(false);
+
+    const ht = (profile.heightFt||5)*12+(parseInt(profile.heightIn)||10);
+    const bmiv = profile.currentWeight ? ((profile.currentWeight/(ht*ht))*703).toFixed(1) : '—';
+    const du = daysUntil(profile.targetDate);
+    const totalToLose = ((profile.startWeight||0)-(profile.targetWeight||0))||1;
+    const weightLost  = ((profile.startWeight||0)-(profile.currentWeight||0));
+    const progPct = totalToLose>0 ? Math.max(0,Math.min((weightLost/totalToLose)*100,100)).toFixed(0) : 0;
+    const sortedLogs = [...(weightLogs||[])].sort((a,b)=>(b.date+':'+(b.time||'')).localeCompare(a.date+':'+(a.time||'')));
+
+    return (
+      <div className="content">
+        <div className="profile-grid">
+          {/* ── LEFT COLUMN ── */}
+          <div className="pcol">
+            {profile.currentWeight && profile.targetWeight && (
+              <div className="goal-prog">
+                <div className="goal-prog-head">
+                  <div>
+                    <div className="goal-prog-title">Weight Goal</div>
+                    <div style={{fontSize:11,color:'var(--muted)',marginTop:3}}>
+                      {profile.currentWeight} → {profile.targetWeight} lbs
+                      {du!==null && <span style={{color:du>0?'var(--green)':'var(--red)',marginLeft:8,fontWeight:700}}>{du>0?`${du} days left`:`${Math.abs(du)}d past`}</span>}
+                    </div>
+                  </div>
+                  <div className="goal-prog-pct">{progPct}%</div>
+                </div>
+                <Bar value={parseFloat(weightLost)} max={totalToLose} color="var(--accent)" height={9}/>
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:9}}>
+                  {weightLost>0 ? <><span style={{color:'var(--green)',fontWeight:700}}>{parseFloat(weightLost).toFixed(1)} lbs</span> lost · {profile.currentWeight-profile.targetWeight>0?`${(profile.currentWeight-profile.targetWeight).toFixed(1)} lbs to go`:'Goal reached'}</> : 'Log your weight daily to track progress'}
+                </div>
+              </div>
+            )}
+
+            <div className="stats-3">
+              {[['Height',`${profile.heightFt||5}'${profile.heightIn||10}"`,'var(--accent)'],
+                ['Weight', profile.currentWeight?`${profile.currentWeight}`:'—','var(--cal)'],
+                ['BMI', bmiv,'var(--green)']].map(([l,v,c])=>(
+                <div key={l} className="stat-card">
+                  <div className="stat-val" style={{color:c}}>{v}</div>
+                  <div className="stat-lbl">{l}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="action-row">
+              <button className="action-btn" onClick={()=>setShowEditProfile(true)}><IcoEdit size={14}/> Edit Profile</button>
+              <button className="action-btn" onClick={()=>setShowEditGoals(true)}><IcoTarget size={14}/> Edit Goals</button>
+            </div>
+
+            <div>
+              <div className="section-label">Daily Goals</div>
+              <div className="goals-grid">
+                {[['Calories',goals.calories,'kcal','var(--cal)'],['Protein',goals.protein,'g','var(--prot)'],
+                  ['Carbs',goals.carbs,'g','var(--carb)'],['Fat',goals.fat,'g','var(--fat)'],
+                  ['Fiber',goals.fiber,'g','var(--fiber)'],['Water',goals.water,'oz','var(--water)']].map(([l,v,u,c])=>(
+                  <div key={l} className="goal-box">
+                    <div className="goal-box-lbl">{l}</div>
+                    <div><span className="goal-box-val" style={{color:c}}>{v}</span><span className="goal-box-unit"> {u}</span></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="section-label">Food Database</div>
+              <div className="db-card" onClick={()=>setShowLibrary(true)}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700}}>Saved Foods</div>
+                  <div style={{fontSize:11,color:'var(--muted)',marginTop:3}}>{foodLibrary.length} items · search, edit & scale</div>
+                </div>
+                <IcoChev dir="right" size={16}/>
+              </div>
+            </div>
+          </div>
+
+          {/* ── RIGHT COLUMN ── */}
+          <div className="pcol">
+            <WeightChart logs={weightLogs||[]} targetWeight={profile.targetWeight}/>
+
+            {sortedLogs.length > 0 && (
+              <div>
+                <div className="section-label">Weight Log</div>
+                <div className="weight-log">
+                  {sortedLogs.slice(0,14).map(e=>(
+                    <div key={e.id} className="weight-entry">
+                      <div>
+                        <div className="weight-entry-date">{fmtShort(e.date)}</div>
+                        {e.time && <div style={{fontSize:9,color:'var(--muted)',marginTop:1,fontWeight:600}}>{fmt12(e.time)}</div>}
+                      </div>
+                      <div className="weight-entry-val">{e.weight} lbs</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <SleepChart logs={sleepLogs||[]}/>
+          </div>
+        </div>
+
+        {showEditProfile && <EditProfileModal profile={profile} onSave={p=>{onUpdateProfile(p);setShowEditProfile(false);}} onClose={()=>setShowEditProfile(false)}/>}
+        {showEditGoals   && <EditGoalsModal   goals={goals}     onSave={g=>{onUpdateGoals(g);setShowEditGoals(false);}}   onClose={()=>setShowEditGoals(false)}/>}
+        {showLibrary     && <FoodLibraryModal library={foodLibrary} onDelete={onDeleteLibraryFood} onEdit={onEditLibraryFood} onLog={onLogLibraryFood} onClose={()=>setShowLibrary(false)}/>}
+      </div>
+    );
+  }
+
+  // ── ONBOARDING ───────────────────────────────────────────────────────────────
+  function Onboarding({ onComplete }) {
+    const [f, setF] = useState({ name:'', heightFt:5, heightIn:10, currentWeight:'', targetWeight:'', targetDate:'' });
+    const [g, setG] = useState({...DEFAULT_GOALS});
+    const s  = k => e => setF(v=>({...v,[k]:e.target.value}));
+    const gs = k => e => setG(v=>({...v,[k]:parseFloat(e.target.value)||0}));
+    return (
+      <div className="onboard">
+        <div className="onboard-inner">
+          <div className="onboard-mark">
+            <svg width="30" height="30" viewBox="0 0 28 28" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 4v8m0 0c0 0-3-4-6-4m6 4c0 0 3-4 6-4M4 20c2-4 5-8 10-8s8 4 10 8"/>
+            </svg>
+          </div>
+          <div className="onboard-title">FitTrack</div>
+          <div className="onboard-sub">Set up your profile to get started</div>
+          <div className="onboard-card">
+            <div className="ob-section">About You</div>
+            <div className="field"><div className="field-lbl">Name (optional)</div><input className="input" placeholder="Your name" value={f.name} onChange={s('name')}/></div>
+            <div className="row2">
+              <div className="field"><div className="field-lbl">Height (ft)</div><input className="input" type="number" value={f.heightFt} onChange={s('heightFt')}/></div>
+              <div className="field"><div className="field-lbl">Height (in)</div><input className="input" type="number" value={f.heightIn} onChange={s('heightIn')}/></div>
+            </div>
+            <div className="row2">
+              <div className="field"><div className="field-lbl">Current Weight (lbs)</div><input className="input" type="number" inputMode="decimal" placeholder="183" value={f.currentWeight} onChange={s('currentWeight')}/></div>
+              <div className="field"><div className="field-lbl">Target Weight (lbs)</div><input className="input" type="number" inputMode="decimal" placeholder="170" value={f.targetWeight} onChange={s('targetWeight')}/></div>
+            </div>
+            <div className="field"><div className="field-lbl">Target Date</div><input className="input" type="date" value={f.targetDate} onChange={s('targetDate')}/></div>
+            <div className="ob-section">Daily Goals</div>
+            <div className="row2">
+              <div className="field"><div className="field-lbl" style={{color:'var(--cal)'}}>Calories</div><input className="input" type="number" value={g.calories} onChange={gs('calories')}/></div>
+              <div className="field"><div className="field-lbl" style={{color:'var(--water)'}}>Water (oz)</div><input className="input" type="number" value={g.water} onChange={gs('water')}/></div>
+            </div>
+            <div className="row4">
+              <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" value={g.protein} onChange={gs('protein')}/></div>
+              <div className="field"><div className="field-lbl" style={{color:'var(--carb)'}}>Carbs g</div><input className="input" type="number" value={g.carbs} onChange={gs('carbs')}/></div>
+              <div className="field"><div className="field-lbl" style={{color:'var(--fat)'}}>Fat g</div><input className="input" type="number" value={g.fat} onChange={gs('fat')}/></div>
+              <div className="field"><div className="field-lbl" style={{color:'var(--fiber)'}}>Fiber g</div><input className="input" type="number" value={g.fiber} onChange={gs('fiber')}/></div>
+            </div>
+            <button className="btn btn-primary" style={{width:'100%',marginTop:8,padding:14,fontSize:15}}
+              onClick={() => onComplete({ name:f.name, heightFt:parseInt(f.heightFt)||5, heightIn:parseInt(f.heightIn)||10, currentWeight:parseFloat(f.currentWeight)||null, startWeight:parseFloat(f.currentWeight)||null, targetWeight:parseFloat(f.targetWeight)||null, targetDate:f.targetDate||'', goals:g })}>
+              Get Started
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── APP ──────────────────────────────────────────────────────────────────────
+  // ── SYNC & ENVIRONMENT ───────────────────────────────────────────────────────
+
+  /* Subscribes to FTSync's connection state so the UI can reflect it. */
+  function useSyncState() {
+    const [state, setState] = useState(() => FTSync.state());
+    useEffect(() => FTSync.onChange(setState), []);
+    return state;
+  }
+
+  const SYNC_LABEL = {
+    'synced':     'Synced',
+    'syncing':    'Syncing…',
+    'error':      'Sync error',
+    'signed-out': 'Sign in',
+    'offline':    'Local only',
+  };
+
+  function SyncPill({ onClick }) {
+    const s = useSyncState();
+    return (
+      <button className="sync-pill" onClick={onClick} title={s.detail || SYNC_LABEL[s.status]}>
+        <span className={`sync-dot ${s.status === 'signed-out' ? 'offline' : s.status}`}/>
+        <span className="sync-text">{s.status === 'synced' && s.email ? 'Synced' : SYNC_LABEL[s.status]}</span>
+      </button>
+    );
+  }
+
+  function EnvBanner() {
+    if (!FTSync.isDev) return null;
+    return (
+      <div className="env-banner">
+        <span>Dev build — changes here do not touch your live data</span>
+        <button onClick={() => FTSync.switchEnv('live')}>Go to Live</button>
+      </div>
+    );
+  }
+
+  function AccountModal({ onClose }) {
+    const s = useSyncState();
+    const [email,  setEmail]  = useState('');
+    const [pw,     setPw]     = useState('');
+    const [mode,   setMode]   = useState('signin');   // signin | signup
+    const [busy,   setBusy]   = useState(false);
+    const [err,    setErr]    = useState('');
+    const [note,   setNote]   = useState('');
+
+    const run = (fn) => {
+      setBusy(true); setErr(''); setNote('');
+      fn().then(res => {
+        if (mode === 'signup' && res && res.user && !res.session) {
+          setNote('Check your email to confirm the account, then sign in.');
+          setMode('signin');
+        }
+      }).catch(e => setErr(e.message || String(e)))
+        .finally(() => setBusy(false));
+    };
+
+    return (
+      <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+        <div className="modal" style={{maxWidth:420}}>
+          <div className="modal-title">Account &amp; Sync</div>
+
+          {!s.configured && (
+            <div className="field-lbl" style={{textTransform:'none',letterSpacing:0,fontSize:12,lineHeight:1.6,color:'var(--muted)',fontWeight:600}}>
+              Cloud sync isn’t configured yet, so FitTrack is saving to this device only.
+              Add your Supabase URL and anon key to <code>config.js</code> to sync across
+              your phone and desktop. Everything else works exactly as it does now.
+            </div>
+          )}
+
+          {s.configured && !s.signedIn && (
+            <>
+              <div className="field">
+                <div className="field-lbl">Email</div>
+                <input className="input" type="email" autoComplete="username" value={email}
+                  onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus/>
+              </div>
+              <div className="field">
+                <div className="field-lbl">Password</div>
+                <input className="input" type="password" autoComplete="current-password" value={pw}
+                  onChange={e => setPw(e.target.value)} placeholder="••••••••"
+                  onKeyDown={e => e.key === 'Enter' && email && pw && run(() => FTSync[mode === 'signin' ? 'signIn' : 'signUp'](email, pw))}/>
+              </div>
+              <div className="modal-actions">
+                <button className="btn btn-ghost" onClick={() => setMode(m => m === 'signin' ? 'signup' : 'signin')}>
+                  {mode === 'signin' ? 'Create account' : 'Have an account'}
+                </button>
+                <button className="btn btn-primary" disabled={busy || !email || !pw}
+                  onClick={() => run(() => FTSync[mode === 'signin' ? 'signIn' : 'signUp'](email, pw))}>
+                  {busy ? 'Working…' : (mode === 'signin' ? 'Sign in' : 'Sign up')}
+                </button>
+              </div>
+            </>
+          )}
+
+          {s.signedIn && (
+            <>
+              <div className="field">
+                <div className="field-lbl">Signed in as</div>
+                <div style={{fontSize:14,fontWeight:700}}>{s.email}</div>
+              </div>
+              <div className="field">
+                <div className="field-lbl">Status</div>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>
+                  {SYNC_LABEL[s.status]}{s.detail ? ` — ${s.detail}` : ''}
+                </div>
+              </div>
+              {FTSync.isDev && (
+                <div className="modal-actions" style={{marginTop:4}}>
+                  <button className="btn btn-ghost" style={{flex:1}} disabled={busy}
+                    onClick={() => run(() => FTSync.copyLiveToDev().then(() => setNote('Copied live data into dev.')))}>
+                    Copy live data into dev
+                  </button>
+                </div>
+              )}
+              <div className="modal-actions">
+                <button className="btn btn-ghost" onClick={() => FTSync.signOut()}>Sign out</button>
+                <button className="btn btn-primary" onClick={onClose}>Done</button>
+              </div>
+            </>
+          )}
+
+          <div className="field-lbl" style={{marginTop:18,marginBottom:8}}>Environment</div>
+          <div style={{display:'flex',gap:10,alignItems:'center'}}>
+            <div style={{flex:1,fontSize:13,fontWeight:700}}>
+              {FTSync.isDev ? 'Dev' : 'Live'}
+              <span style={{color:'var(--muted)',fontWeight:600}}>
+                {FTSync.isDev ? ' — a sandbox with its own data' : ' — your real data'}
+              </span>
+            </div>
+            <button className="btn btn-ghost btn-sm"
+              onClick={() => FTSync.switchEnv(FTSync.isDev ? 'live' : 'dev')}>
+              Switch to {FTSync.isDev ? 'Live' : 'Dev'}
+            </button>
+          </div>
+
+          {err  && <div style={{marginTop:14,color:'var(--red)',fontSize:12,fontWeight:700}}>{err}</div>}
+          {note && <div style={{marginTop:14,color:'var(--green)',fontSize:12,fontWeight:700}}>{note}</div>}
+
+          {(!s.configured || (s.configured && !s.signedIn)) && (
+            <div className="modal-actions">
+              <button className="btn btn-ghost" style={{flex:1}} onClick={onClose}>Close</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function App() {
+    const [profile,    setProfile]    = useState(() => load('ft_profile', null));
+    const [days,       setDays]       = useState(() => load('ft_days', {}));
+    const [foodLib,    setFoodLib]    = useState(() => load('ft_library', SAMPLE_LIBRARY));
+    const [weightLogs, setWeightLogs] = useState(() => load('ft_weight_logs', []));
+    const [sleepLogs,  setSleepLogs]  = useState(() => load('ft_sleep_logs', []));
+    const [date,       setDate]       = useState(TODAY);
+    const [tab,        setTab]        = useState('dashboard');
+    const [showWL,     setWL]         = useState(false);
+    const [showAddFood,setShowAddFood]= useState(false);
+    const [showAccount,setShowAccount]= useState(false);
+    const sync = useSyncState();
+
+    // Changes arriving from another device (or from the initial cloud pull).
+    // FTSync has already reconciled and cached them, so the save effects below
+    // see identical values and skip pushing them straight back up.
+    useEffect(() => FTSync.onRemote((key, value) => {
+      if      (key === 'ft_profile')      setProfile(value);
+      else if (key === 'ft_days')         setDays(value || {});
+      else if (key === 'ft_library')      setFoodLib(value || []);
+      else if (key === 'ft_weight_logs')  setWeightLogs(value || []);
+      else if (key === 'ft_sleep_logs')   setSleepLogs(value || []);
+    }), []);
+
+    useEffect(() => { if(profile) save('ft_profile', profile); }, [profile]);
+    useEffect(() => { save('ft_days', days); }, [days]);
+    useEffect(() => { save('ft_library', foodLib); }, [foodLib]);
+    useEffect(() => { save('ft_weight_logs', weightLogs); }, [weightLogs]);
+    useEffect(() => { save('ft_sleep_logs',  sleepLogs);  }, [sleepLogs]);
+    useEffect(() => { const el=document.getElementById('loading'); if(el) el.style.display='none'; }, []);
+
+    useEffect(() => {
+      setFoodLib(prev => {
+        const libNames = new Set(prev.map(f => f.name.toLowerCase()));
+        const seen = new Set(); const newFoods = [];
+        Object.values(days).forEach(d => (d.meals||[]).forEach(meal => {
+          const key = meal.name.toLowerCase();
+          if (!libNames.has(key) && !seen.has(key) && meal.name) {
+            seen.add(key);
+            newFoods.push({ id:Date.now()+Math.random(), name:meal.name, calories:meal.calories||0, protein:meal.protein||0, carbs:meal.carbs||0, fat:meal.fat||0, fiber:meal.fiber||0, servingSize:meal.servingSize||'' });
+          }
+        }));
+        return newFoods.length > 0 ? [...prev, ...newFoods] : prev;
+      });
+    }, []); // eslint-disable-line
+
+    useEffect(() => {
+      setWeightLogs(prev => {
+        const existingDates = new Set(prev.map(e=>e.date));
+        const migrated = Object.entries(days)
+          .filter(([d,data]) => data.weight && !existingDates.has(d))
+          .map(([d,data]) => ({id:Date.now()+Math.random(), date:d, time:'08:00', weight:data.weight}));
+        return migrated.length > 0 ? [...prev, ...migrated] : prev;
+      });
+    }, []); // eslint-disable-line
+
+    const goals = profile?.goals ? { ...DEFAULT_GOALS, ...profile.goals } : DEFAULT_GOALS;
+    const isToday = date === TODAY;
+    const getDay   = d => days[d] || { date:d, meals:[], workouts:[], waterOz:0, weight:null };
+    const updateDay= (d, fn) => setDays(prev => ({ ...prev, [d]: fn(prev[d]||{date:d,meals:[],workouts:[],waterOz:0,weight:null}) }));
+
+    const addMeal       = m  => updateDay(date, d => ({ ...d, meals:[...(d.meals||[]),m] }));
+    const deleteMeal    = id => updateDay(date, d => ({ ...d, meals:(d.meals||[]).filter(m=>m.id!==id) }));
+    const editMeal      = (id,u) => updateDay(date, d => ({ ...d, meals:(d.meals||[]).map(m=>m.id===id?{...u,id}:m) }));
+    const addWater      = oz => updateDay(date, d => ({ ...d, waterOz:Math.max(0,(d.waterOz||0)+oz) }));
+    const addWorkout    = w  => updateDay(date, d => ({ ...d, workouts:[...(d.workouts||[]),w] }));
+    const deleteWorkout = id => updateDay(date, d => ({ ...d, workouts:(d.workouts||[]).filter(w=>w.id!==id) }));
+    const logWeight     = ({weight,time}) => {
+      updateDay(date, d=>({...d,weight}));
+      setProfile(p=>({...p,currentWeight:weight}));
+      setWeightLogs(prev=>[...prev,{id:Date.now(),date,time,weight}]);
+      setWL(false);
+    };
+    const logSleep      = s  => setSleepLogs(prev=>[...prev,s]);
+    const addToLib      = f  => setFoodLib(prev => {
+      const k = (f.name||'').trim().toLowerCase();
+      const i = prev.findIndex(e => (e.name||'').trim().toLowerCase() === k);
+      if (i >= 0) { const c = [...prev]; c[i] = { ...prev[i], ...f, id:prev[i].id }; return c; }
+      return [...prev, {...f, id:Date.now()+Math.random()}];
+    });
+    const deleteFromLib = id => setFoodLib(prev => prev.filter(f=>f.id!==id));
+    const removeFromLib = nm => setFoodLib(prev => prev.filter(f => (f.name||'').trim().toLowerCase() !== (nm||'').trim().toLowerCase()));
+    const updateInLib   = f  => setFoodLib(prev => prev.map(e => e.id===f.id ? f : e));
+    const logFoodToday  = m  => updateDay(TODAY, d => ({ ...d, meals:[...(d.meals||[]),m] }));
+
+    const currentDay = getDay(date);
+
+    if (!profile) {
+      // A fresh device that is already signed in almost certainly has a profile
+      // waiting in the cloud. Showing onboarding here would invite the user to
+      // re-enter data that is seconds away from arriving.
+      if (sync.signedIn && sync.status === 'syncing') {
+        return (
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:14}}>
+            <div className="spinner"/>
+            <div style={{fontSize:12,color:'var(--muted)',fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase'}}>
+              Restoring your data…
+            </div>
+          </div>
+        );
+      }
+      return (
+        <>
+          <Onboarding onComplete={p => setProfile(p)}/>
+          <div style={{position:'fixed',top:16,right:16,zIndex:150}}>
+            <SyncPill onClick={() => setShowAccount(true)}/>
+          </div>
+          {showAccount && <AccountModal onClose={() => setShowAccount(false)}/>}
+        </>
+      );
+    }
+
+    const relSub = isToday ? 'Today' : (() => { const dd=daysUntil(date); return dd<0?`${-dd} days ago`:`in ${dd} days`; })();
+
+    return (
+      <>
+      <EnvBanner/>
+      <div className="app">
+        {/* ── SIDEBAR ── */}
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark">
+              <svg width="22" height="22" viewBox="0 0 28 28" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 4v8m0 0c0 0-3-4-6-4m6 4c0 0 3-4 6-4M4 20c2-4 5-8 10-8s8 4 10 8"/>
+              </svg>
+            </div>
+            <div className="brand-text">FitTrack</div>
+          </div>
+          <div className="nav-cap">Menu</div>
+          <nav className="nav">
+            {[['dashboard',<IcoDash/>,'Dashboard'],['history',<IcoHist/>,'History'],['profile',<IcoProf/>,'Goals & Profile']].map(([t,icon,lbl])=>(
+              <button key={t} className={`nav-item ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
+                <span className="nav-ico">{icon}</span><span className="nav-label">{lbl}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-foot">
+            <button className="weight-chip-side" onClick={()=>setWL(true)}>
+              <span className="nav-ico"><IcoScale size={20}/></span>
+              <div className="ws-block">
+                <div className="ws-k">Weight</div>
+                <div className="ws-v">{currentDay.weight ? `${currentDay.weight} lbs` : 'Log now'}</div>
+              </div>
+            </button>
+          </div>
+        </aside>
+
+        {/* ── MAIN ── */}
+        <div className="main">
+          <header className="topbar">
+            <div className="topbar-left">
+              {tab==='dashboard' ? (
+                <div className="datenav">
+                  <button className="date-btn" onClick={()=>setDate(d=>addDays(d,-1))}><IcoChev dir="left" size={15}/></button>
+                  <div className="datenav-label">
+                    <div className="datenav-main">{fmtFull(date)}</div>
+                    <div className="datenav-sub">{relSub}</div>
+                  </div>
+                  <button className="date-btn" onClick={()=>setDate(d=>addDays(d,1))}><IcoChev dir="right" size={15}/></button>
+                  {!isToday && <button className="today-pill" onClick={()=>setDate(TODAY)}>Jump to Today</button>}
+                </div>
+              ) : (
+                <div className="topbar-title">{tab==='history' ? 'History' : 'Goals & Profile'}</div>
+              )}
+            </div>
+            <div className="topbar-right">
+              <SyncPill onClick={()=>setShowAccount(true)}/>
+              <button className="weight-chip" onClick={()=>setWL(true)}>{currentDay.weight ? `${currentDay.weight} lbs` : '+ Log Weight'}</button>
+              {tab==='dashboard' && <button className="btn-accent" onClick={()=>setShowAddFood(true)}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>}
+            </div>
+          </header>
+
+          <div className="scroll-area">
+            {tab==='dashboard' && <DashboardView day={currentDay} goals={goals} foodLibrary={foodLib} sleepLogs={sleepLogs}
+              onAddMeal={addMeal} onDeleteMeal={deleteMeal} onEditMeal={editMeal}
+              onAddWater={addWater} onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
+              onAddWorkout={addWorkout} onDeleteWorkout={deleteWorkout} onLogSleep={logSleep}
+              onOpenAddFood={()=>setShowAddFood(true)}/>}
+            {tab==='history'   && <HistoryView days={days} goals={goals} onNavigate={d=>{setDate(d);setTab('dashboard');}}/>}
+            {tab==='profile'   && <ProfileView profile={profile} goals={goals} days={days} foodLibrary={foodLib}
+              weightLogs={weightLogs} sleepLogs={sleepLogs}
+              onUpdateProfile={p=>setProfile(prev=>({...prev,...p}))}
+              onUpdateGoals={g=>setProfile(prev=>({...prev,goals:g}))}
+              onDeleteLibraryFood={deleteFromLib}
+              onEditLibraryFood={updateInLib}
+              onLogLibraryFood={logFoodToday}/>}
+          </div>
+        </div>
+
+        {showWL && <LogWeightModal current={currentDay.weight} onSave={logWeight} onClose={()=>setWL(false)}/>}
+        {showAddFood && <AddFoodModal foodLibrary={foodLib}
+          onSave={m=>{addMeal(m);setShowAddFood(false);}}
+          onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
+          onClose={()=>setShowAddFood(false)}/>}
+        {showAccount && <AccountModal onClose={()=>setShowAccount(false)}/>}
+      </div>
+      </>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

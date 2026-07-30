@@ -1,0 +1,84 @@
+name: Deploy to GitHub Pages
+
+# Publishes one Pages site containing both environments:
+#   /       live  — built from `main`
+#   /dev/   dev   — built from `dev` if that branch exists, else from `main`
+#
+# So a push to `dev` updates only the dev build, and merging to `main` ships it.
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead, and don't cancel one mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main (live)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: live
+
+      - name: Check out dev
+        id: dev
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: dev
+          path: dev
+
+      # Before the `dev` branch exists, build the dev environment from main so
+      # /dev/ is never a 404.
+      - name: Fall back to main for dev
+        if: steps.dev.outcome != 'success'
+        run: cp -r live dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build live
+        working-directory: live
+        run: |
+          npm ci
+          npm run build:web
+
+      - name: Build dev
+        working-directory: dev
+        run: |
+          npm ci
+          npm run build:web:dev
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp -r live/dist-web/. site/
+          mkdir -p site/dev
+          cp -r dev/dist-web-dev/. site/dev/
+          touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

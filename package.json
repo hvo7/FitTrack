@@ -1,0 +1,64 @@
+{
+  "name": "fittrack",
+  "productName": "FitTrack",
+  "version": "1.1.0",
+  "description": "Personal daily macro & fitness tracker — desktop, mobile and web, synced through one account",
+  "private": true,
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --env=dev",
+    "vendor": "node build.js --vendor",
+    "icons": "node tools/gen-icons.js",
+    "serve": "node tools/serve.js",
+    "build:web": "node build.js",
+    "build:web:dev": "node build.js --dev",
+    "build:pages": "node build.js && node build.js --dev && node tools/assemble-pages.js",
+    "build:desktop": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@babel/standalone": "^7.25.0",
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.23.0"
+  },
+  "build": {
+    "appId": "com.henry.fittrack",
+    "productName": "FitTrack",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true,
+    "files": [
+      "main.js",
+      "index.html",
+      "config.js",
+      "sync.js",
+      "lib/**",
+      "public/icons/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FitTrack",
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
