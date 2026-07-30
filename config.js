@@ -14,8 +14,8 @@
  * exactly as it did before, with no sign-in and no sync.
  */
 window.FT_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_URL: 'https://ijhuqfszjjfbxfhvjisy.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_GgFjGqVb2-CZWpFlsU9fjw_kascBL9I',
 
   /* Where the app is deployed, with no trailing slash — e.g.
    * 'https://hvo7.github.io/FitTrack'.
@@ -24,5 +24,5 @@ window.FT_CONFIG = {
    * instead of its bundled copy, so pushing to GitHub updates your desktop
    * app too, with no reinstall. Leave blank to always run the bundled copy.
    */
-  APP_URL: '',
+  APP_URL: 'https://hvo7.github.io/FitTrack',
 };
