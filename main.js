@@ -51,7 +51,9 @@ function createWindow() {
       nodeIntegration: false,
     },
     title: 'FitTrack',
-    icon: path.join(__dirname, 'public', 'icons', 'icon-512.png'),
+    // .ico on Windows so the taskbar and title bar each pick a size that suits
+    // them; the PNG is only a fallback for other platforms.
+    icon: path.join(__dirname, 'public', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon-512.png'),
     autoHideMenuBar: true,
     backgroundColor: '#080812',
     show: false,

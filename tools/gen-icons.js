@@ -149,6 +149,40 @@ function makeIcon(size, { maskable }) {
   return encodePng(size, buf);
 }
 
+// ── ICO ──────────────────────────────────────────────────────────────────────
+/* Windows needs a real .ico: Explorer, the taskbar and shortcuts each pick a
+ * different size out of it. Shipping one also keeps electron-builder from
+ * having to convert a PNG itself — that conversion runs through the winCodeSign
+ * toolchain, which cannot be extracted on a machine without symlink privilege.
+ *
+ * Entries are stored as PNG, which every Windows since Vista reads. */
+const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
+
+function encodeIco(pngs) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);           // reserved
+  header.writeUInt16LE(1, 2);           // type: icon
+  header.writeUInt16LE(pngs.length, 4);
+
+  let offset = 6 + pngs.length * 16;
+  const entries = [];
+  for (const { size, data } of pngs) {
+    const e = Buffer.alloc(16);
+    e[0] = size >= 256 ? 0 : size;      // 0 means 256
+    e[1] = size >= 256 ? 0 : size;
+    e[2] = 0;                           // palette size
+    e[3] = 0;                           // reserved
+    e.writeUInt16LE(1, 4);              // colour planes
+    e.writeUInt16LE(32, 6);             // bits per pixel
+    e.writeUInt32LE(data.length, 8);
+    e.writeUInt32LE(offset, 12);
+    entries.push(e);
+    offset += data.length;
+  }
+
+  return Buffer.concat([header, ...entries, ...pngs.map((p) => p.data)]);
+}
+
 fs.mkdirSync(OUT, { recursive: true });
 for (const [name, size, opts] of [
   ['icon-192.png', 192, { maskable: false }],
@@ -158,3 +192,8 @@ for (const [name, size, opts] of [
   fs.writeFileSync(path.join(OUT, name), makeIcon(size, opts));
   console.log('wrote', path.relative(path.join(__dirname, '..'), path.join(OUT, name)));
 }
+
+const ico = encodeIco(ICO_SIZES.map((size) => ({ size, data: makeIcon(size, { maskable: false }) })));
+fs.writeFileSync(path.join(OUT, 'icon.ico'), ico);
+console.log('wrote', path.relative(path.join(__dirname, '..'), path.join(OUT, 'icon.ico')),
+            `(${ICO_SIZES.join(', ')})`);
