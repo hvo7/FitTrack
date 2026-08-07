@@ -492,6 +492,23 @@
     return null;
   };
 
+  /* The most recent time a food was actually logged, used to recover what a
+   * library entry's macros describe when the entry itself never recorded it.
+   * A log is the better witness anyway: it is what the numbers were used for. */
+  const lastLoggedServing = (days, name) => {
+    const key = (name||'').trim().toLowerCase();
+    if (!key) return null;
+    let best = null;
+    Object.values(days||{}).forEach(day => {
+      (day.meals||[]).forEach(meal => {
+        if ((meal.name||'').trim().toLowerCase() !== key || !meal.servingSize) return;
+        const when = meal.addedAt || day.date || '';
+        if (!best || String(when) > String(best.when)) best = { when, date:day.date, servingSize:meal.servingSize };
+      });
+    });
+    return best;
+  };
+
   /* The amount a set of macros describes. Scaling always happens relative to
    * one of these, so it works for a library food, a hand-typed food, and a meal
    * edited weeks later alike. */
@@ -1134,32 +1151,95 @@
     );
   }
 
-  function EditFoodModal({ food, onSave, onClose }) {
+  function EditFoodModal({ food, days, onSave, onClose }) {
+    /* What this entry's macros actually describe. Older entries stored only a
+     * free-text serving, or nothing at all, which left "220 calories" meaning
+     * nothing in particular — so fall back to the last time the food was
+     * logged, which is the best surviving record of what the numbers were for. */
+    const recent = !food.servingQty && !food.servingSize ? lastLoggedServing(days, food.name) : null;
+    const known = food.servingQty ? { qty:String(food.servingQty), unit:food.servingUnit||'g' }
+                : food.servingSize ? parseQtyUnit(food.servingSize)
+                : recent ? parseQtyUnit(recent.servingSize)
+                : null;
+
     const [form, setForm] = useState({
       name:food.name, calories:food.calories, protein:food.protein,
-      carbs:food.carbs, fat:food.fat, fiber:food.fiber||0, servingSize:food.servingSize||'',
+      carbs:food.carbs, fat:food.fat, fiber:food.fiber||0,
+      qty: known ? known.qty : '1',
+      unit: known ? known.unit : 'serving',
     });
+    // Plenty of older entries recorded no serving at all, and no log of them
+    // did either. Saying "220 cal for 1 serving" there would be inventing a
+    // fact, so the amount is marked unknown until it is actually set.
+    const [amountSet, setAmountSet] = useState(!!known);
     const set = (k, v) => setForm(f => ({...f, [k]: v}));
+    const setAmount = (k, v) => { setAmountSet(true); set(k, v); };
     const valid = form.name.trim().length > 0 && Number(form.calories) >= 0;
+
+    const qtyNum = parseFloat(form.qty) || 1;
+    const amount = `${+qtyNum.toFixed(2)} ${form.unit}`;
+    const perGram = toGrams(qtyNum, form.unit);
+
     const handleSave = () => {
       if (!valid) return;
+      // Persist the amount in structured form, not just as a label, so logging
+      // this food later can scale from it.
       onSave({ ...food, name:form.name.trim(),
         calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
         carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
-        fiber:parseFloat(form.fiber)||0, servingSize:form.servingSize.trim() });
+        fiber:parseFloat(form.fiber)||0,
+        servingQty:amountSet ? qtyNum : food.servingQty,
+        servingUnit:amountSet ? form.unit : food.servingUnit,
+        grams:amountSet ? toGrams(qtyNum, form.unit) : food.grams,
+        servingSize:amountSet ? amount : (food.servingSize||'') });
       onClose();
     };
     return (
       <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
         <div className="modal">
           <div className="modal-title">Edit Food</div>
+
+          <div style={{padding:'11px 13px',marginBottom:13,background:'var(--card2)',
+                       border:'1px solid var(--border)',borderLeft:'3px solid var(--accent)',
+                       borderRadius:'var(--rs)'}}>
+            <div style={{fontSize:13,fontWeight:700,letterSpacing:'-0.01em'}}>
+              <span style={{color:'var(--cal)'}}>{parseFloat(form.calories)||0} cal</span>
+              <span style={{color:'var(--muted)',fontWeight:600}}> for </span>
+              {amountSet
+                ? <span>{amount}</span>
+                : <span style={{color:'var(--fat)'}}>an amount that was never recorded</span>}
+            </div>
+            <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,marginTop:3}}>
+              P {parseFloat(form.protein)||0}g · C {parseFloat(form.carbs)||0}g · F {parseFloat(form.fat)||0}g · Fi {parseFloat(form.fiber)||0}g
+              {amountSet && perGram > 0 && ` · ${Math.round(((parseFloat(form.calories)||0)/perGram)*100)/100} cal/g`}
+            </div>
+            {recent ? (
+              <div style={{fontSize:10,color:'var(--fiber)',fontWeight:700,marginTop:5}}>
+                Amount recovered from your last log of this food{recent.date ? ` on ${recent.date}` : ''} — confirm it below
+              </div>
+            ) : !amountSet && (
+              <div style={{fontSize:10,color:'var(--fat)',fontWeight:700,marginTop:5}}>
+                Set it below so logging this food can scale correctly
+              </div>
+            )}
+          </div>
+
           <div className="field">
             <div className="field-lbl">Name</div>
             <input className="input" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Food name"/>
           </div>
           <div className="row2">
             <div className="field"><div className="field-lbl">Calories</div><input className="input" type="number" min="0" value={form.calories} onChange={e=>set('calories',e.target.value)}/></div>
-            <div className="field"><div className="field-lbl">Serving Size</div><input className="input" value={form.servingSize} onChange={e=>set('servingSize',e.target.value)} placeholder="e.g. 1 cup"/></div>
+            <div className="field">
+              <div className="field-lbl">These macros are for</div>
+              <div style={{display:'flex',gap:8}}>
+                <input className="input" type="number" inputMode="decimal" min="0" style={{flex:'1 1 0',minWidth:0}}
+                  value={form.qty} onChange={e=>setAmount('qty',e.target.value.replace(/[^0-9.]/g,''))}/>
+                <select className="unit-select" value={form.unit} onChange={e=>setAmount('unit',e.target.value)}>
+                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
           <div className="row4">
             <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" min="0" value={form.protein} onChange={e=>set('protein',e.target.value)}/></div>
@@ -1232,7 +1312,7 @@
     );
   }
 
-  function FoodLibraryModal({ library, onDelete, onEdit, onLog, onClose }) {
+  function FoodLibraryModal({ library, days, onDelete, onEdit, onLog, onClose }) {
     const [search, setSearch] = useState('');
     const [editingFood, setEditingFood] = useState(null);
     const [loggingFood, setLoggingFood] = useState(null);
@@ -1266,7 +1346,7 @@
               </div>
           }
         </div>
-        {editingFood  && <EditFoodModal food={editingFood} onSave={f=>{onEdit(f);setEditingFood(null);}} onClose={()=>setEditingFood(null)}/>}
+        {editingFood  && <EditFoodModal food={editingFood} days={days} onSave={f=>{onEdit(f);setEditingFood(null);}} onClose={()=>setEditingFood(null)}/>}
         {loggingFood  && <LogLibraryFoodModal food={loggingFood} onLog={f=>{onLog(f);setLoggingFood(null);}} onClose={()=>setLoggingFood(null)}/>}
       </div>
     );
@@ -1809,7 +1889,7 @@
 
         {showEditProfile && <EditProfileModal profile={profile} onSave={p=>{onUpdateProfile(p);setShowEditProfile(false);}} onClose={()=>setShowEditProfile(false)}/>}
         {showEditGoals   && <EditGoalsModal   goals={goals}     onSave={g=>{onUpdateGoals(g);setShowEditGoals(false);}}   onClose={()=>setShowEditGoals(false)}/>}
-        {showLibrary     && <FoodLibraryModal library={foodLibrary} onDelete={onDeleteLibraryFood} onEdit={onEditLibraryFood} onLog={onLogLibraryFood} onClose={()=>setShowLibrary(false)}/>}
+        {showLibrary     && <FoodLibraryModal library={foodLibrary} days={days} onDelete={onDeleteLibraryFood} onEdit={onEditLibraryFood} onLog={onLogLibraryFood} onClose={()=>setShowLibrary(false)}/>}
       </div>
     );
   }
