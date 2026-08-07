@@ -477,6 +477,33 @@
   const UNITS = ['g','oz','lb','slice','piece','cup','tbsp','tsp','serving'];
   const GRAM_CONV = {g:1, oz:28.3495, lb:453.592};
   const toGrams = (qty,unit) => GRAM_CONV[unit] ? qty*GRAM_CONV[unit] : null;
+
+  /* How many times bigger `to` is than `from`. Mass units convert freely, so
+   * 85g -> 6oz scales correctly; identical units divide directly, covering
+   * counted things like slices. Anything else (g -> slice) has no defined
+   * conversion and returns null, which callers treat as "re-baseline" rather
+   * than quietly leaving the macros wrong. */
+  const ratioBetween = (fromQty, fromUnit, toQty, toUnit) => {
+    const from = parseFloat(fromQty), to = parseFloat(toQty);
+    if (!(from > 0) || !(to >= 0)) return null;
+    const fg = toGrams(from, fromUnit), tg = toGrams(to, toUnit);
+    if (fg !== null && tg !== null && fg > 0) return tg / fg;
+    if (fromUnit === toUnit) return to / from;
+    return null;
+  };
+
+  /* The amount a set of macros describes. Scaling always happens relative to
+   * one of these, so it works for a library food, a hand-typed food, and a meal
+   * edited weeks later alike. */
+  const basisFrom = (src, qty, unit) => src == null ? null : ({
+    qty: parseFloat(qty) || 1,
+    unit,
+    calories: parseFloat(src.calories) || 0,
+    protein:  parseFloat(src.protein)  || 0,
+    carbs:    parseFloat(src.carbs)    || 0,
+    fat:      parseFloat(src.fat)      || 0,
+    fiber:    parseFloat(src.fiber)    || 0,
+  });
   const parseQtyUnit = s => {
     if (!s) return {qty:'1',unit:'g'};
     const m = String(s).trim().match(/^([0-9.]+)\s*(.+)?$/);
@@ -650,26 +677,44 @@
     const searchRef = useRef(null);
     useEffect(() => { if(searchRef.current) searchRef.current.focus(); }, []);
 
-    useEffect(() => {
-      if (!baseFood || !form.qty || !parseFloat(form.qty)) return;
-      const inputQty = parseFloat(form.qty);
-      const inputG   = toGrams(inputQty, form.unit);
-      const baseG    = baseFood.grams;
-      let ratio;
-      if (inputG !== null && baseG) {
-        ratio = inputG / baseG;
-      } else if (form.unit === (baseFood.servingUnit || 'g')) {
-        ratio = inputQty / (baseFood.servingQty || baseG || 1);
-      } else { return; }
+    /* A meal's macros always describe its own serving size, so an existing meal
+     * is its own basis — that is what makes editing one rescale properly. */
+    const [basis, setBasis] = useState(() =>
+      initialMeal && initialMeal.calories != null ? basisFrom(initialMeal, qs.qty, qs.unit) : null);
+
+    const round1 = v => Math.round(v * 10) / 10;
+
+    /* Scaling runs from the change handlers rather than an effect: an effect
+     * watching the macro fields would fight the user as they typed. */
+    const applyAmount = (qtyStr, unit) => {
+      const q = parseFloat(qtyStr);
+      const r = basis && q ? ratioBetween(basis.qty, basis.unit, q, unit) : null;
+      if (r === null) { setForm(f => ({ ...f, qty:qtyStr, unit })); return; }
       setForm(f => ({
-        ...f,
-        calories: String(Math.round(baseFood.calories * ratio)),
-        protein:  String(+(baseFood.protein  * ratio).toFixed(1)),
-        carbs:    String(+(baseFood.carbs    * ratio).toFixed(1)),
-        fat:      String(+(baseFood.fat      * ratio).toFixed(1)),
-        fiber:    String(+((baseFood.fiber||0) * ratio).toFixed(1)),
+        ...f, qty:qtyStr, unit,
+        calories: String(Math.round(basis.calories * r)),
+        protein:  String(round1(basis.protein * r)),
+        carbs:    String(round1(basis.carbs   * r)),
+        fat:      String(round1(basis.fat     * r)),
+        fiber:    String(round1(basis.fiber   * r)),
       }));
-    }, [form.qty, form.unit, baseFood]); // eslint-disable-line
+    };
+
+    const changeQty = v => applyAmount(v.replace(/[^0-9.]/g,''), form.unit);
+
+    const changeUnit = u => {
+      const q = parseFloat(form.qty) || 1;
+      /* Some unit changes have no conversion — 85 g is not 85 slices, and
+       * carrying the number across would be nonsense. Treat the macros on
+       * screen as describing one of the new unit, so the amount becomes "1
+       * slice" and scaling continues correctly from there. */
+      if (basis && ratioBetween(basis.qty, basis.unit, q, u) === null) {
+        setBasis(basisFrom(form, 1, u));
+        setForm(f => ({ ...f, qty:'1', unit:u }));
+        return;
+      }
+      applyAmount(form.qty, u);
+    };
 
     const results = search.trim().length > 0
       ? foodLibrary.filter(f => f.name.toLowerCase().includes(search.toLowerCase())).slice(0,6)
@@ -682,15 +727,15 @@
         carbs:String(food.carbs), fat:String(food.fat), fiber:String(food.fiber||0),
         qty:String(sq), unit:su }));
       setBaseFood((food.grams||food.servingQty) ? {...food, servingQty:sq, servingUnit:su} : null);
+      setBasis(basisFrom(food, sq, su));
       setSearch('');
     };
 
     const quickAdd = food => {
       const inputQty = parseFloat(form.qty)||1;
-      const inputG   = toGrams(inputQty, form.unit);
-      let ratio = 1;
-      if (inputG !== null && food.grams)  ratio = inputG / food.grams;
-      else if (form.unit === (food.servingUnit||'g') && food.servingQty) ratio = inputQty / food.servingQty;
+      const sq = food.servingQty || food.grams || 1;
+      const su = food.servingUnit || (food.grams ? 'g' : 'serving');
+      const ratio = ratioBetween(sq, su, inputQty, form.unit) ?? 1;
       const sc = v => Math.round((v||0) * ratio * 10) / 10;
       onSave({ id:Date.now(), name:food.name, mealType:form.mealType,
         calories:sc(food.calories), protein:sc(food.protein), carbs:sc(food.carbs),
@@ -699,7 +744,21 @@
     };
 
     const s = k => e => setForm(f=>({...f,[k]:e.target.value}));
-    const n = k => e => setForm(f=>({...f,[k]:e.target.value.replace(/[^0-9.]/g,'')}));
+
+    /* Correcting a macro by hand asserts "at this amount, these are the real
+     * numbers", so it replaces the basis — otherwise the next amount change
+     * would scale from the old value and throw the correction away.
+     *
+     * This only ever *updates* a basis, never creates one: while a new food is
+     * still being typed there is no established amount to scale from, and
+     * inventing one would rescale the macros on every keystroke in the amount
+     * field. Such a food becomes scalable once it is saved, since the logged
+     * meal then carries the serving size its macros describe. */
+    const n = k => e => {
+      const next = { ...form, [k]: e.target.value.replace(/[^0-9.]/g,'') };
+      setForm(next);
+      if (basis) setBasis(basisFrom(next, next.qty, next.unit));
+    };
     const valid = form.name.trim() && form.calories !== '';
 
     const doSave = () => {
@@ -791,24 +850,19 @@
           </div>
 
           <div className="field">
-            {baseFood && (() => {
-              const iG = toGrams(parseFloat(form.qty)||0, form.unit);
-              const hint = iG !== null && baseFood.grams
-                ? `${Math.round(iG)}g of ${baseFood.grams}g base · auto-scales`
-                : 'auto-scales macros';
-              return (
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:7}}>
-                  <div className="field-lbl" style={{marginBottom:0}}>Amount</div>
-                  <div style={{fontSize:9,color:'var(--fiber)',fontWeight:700}}>{hint}</div>
+            {basis ? (
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:7}}>
+                <div className="field-lbl" style={{marginBottom:0}}>Amount</div>
+                <div style={{fontSize:9,color:'var(--fiber)',fontWeight:700}}>
+                  {`scales from ${+basis.qty} ${basis.unit}`}
                 </div>
-              );
-            })()}
-            {!baseFood && <div className="field-lbl">Amount</div>}
+              </div>
+            ) : <div className="field-lbl">Amount</div>}
             <div style={{display:'flex',gap:10}}>
               <input className="input" type="number" inputMode="decimal" placeholder="1"
-                value={form.qty} onChange={n('qty')} style={{flex:'2 1 0'}}/>
+                value={form.qty} onChange={e => changeQty(e.target.value)} style={{flex:'2 1 0'}}/>
               <select className="unit-select" value={form.unit}
-                onChange={e => setForm(f=>({...f,unit:e.target.value}))}>
+                onChange={e => changeUnit(e.target.value)}>
                 <option value="g">g</option>
                 <option value="oz">oz</option>
                 <option value="lb">lb</option>
