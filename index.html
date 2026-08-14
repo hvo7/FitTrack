@@ -123,6 +123,7 @@
     .meal-name { font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .meal-serving { font-size:11px; color:var(--muted); margin-top:2px; }
     .meal-pills { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+    .version-chip { font-size:10px; font-weight:700; color:var(--muted); letter-spacing:0.02em; padding:4px 8px; border-radius:7px; background:var(--card2); border:1px solid var(--border); white-space:nowrap; cursor:default; }
     .pill { font-size:10px; font-weight:700; padding:3px 8px; border-radius:7px; letter-spacing:0.02em; }
     .meal-cal-block { text-align:right; flex-shrink:0; }
     .meal-cal-num { font-size:16px; font-weight:800; letter-spacing:-0.02em; }
@@ -363,6 +364,13 @@
 
   <script type="text/babel">
   const { useState, useEffect, useRef } = React;
+
+  /* Which build this is. `FT_BUILD` is stamped in at build time and looks like
+   * "1.1.0-live-mssj4308": version, environment, and a base-36 stamp of the
+   * source it was built from. Unbuilt source has none, and says so rather than
+   * claiming a version it cannot vouch for. */
+  const BUILD = window.FT_BUILD || null;
+  const VERSION = BUILD ? BUILD.split('-')[0] : null;
 
   // Must run before any component reads storage — it resolves the environment
   // and starts restoring the session.
@@ -2220,6 +2228,9 @@
               )}
             </div>
             <div className="topbar-right">
+              <div className="version-chip" title={BUILD ? `Build ${BUILD}` : 'Running from source — no build stamp'}>
+                {VERSION ? `v${VERSION}` : 'source'}
+              </div>
               <SyncPill onClick={()=>setShowAccount(true)}/>
               <button className="weight-chip" onClick={()=>setWL(true)}>{currentDay.weight ? `${currentDay.weight} lbs` : '+ Log Weight'}</button>
               {tab==='dashboard' && <button className="btn-accent" onClick={()=>setShowAddFood(true)}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>}

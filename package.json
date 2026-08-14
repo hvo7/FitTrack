@@ -1,7 +1,7 @@
 {
   "name": "fittrack",
   "productName": "FitTrack",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Personal daily macro & fitness tracker — desktop, mobile and web, synced through one account",
   "private": true,
   "license": "MIT",
@@ -47,7 +47,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "public/icons/icon.ico"

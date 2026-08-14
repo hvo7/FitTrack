@@ -105,7 +105,17 @@ function build(isDev) {
   // Babel is dead weight now that the JSX is precompiled.
   html = html.replace(/[ \t]*<script src="\.\/lib\/babel\.min\.js"><\/script>\r?\n?/, '');
 
-  html = html.replace('</head>', PWA_HEAD + '\n</head>');
+  // The service worker keys its cache on this id, so every build reaches
+  // devices instead of serving a stale shell forever. The app shows it too, so
+  // "which version am I actually looking at" is answerable from the UI.
+  const buildId = [
+    require('./package.json').version,
+    isDev ? 'dev' : 'live',
+    Math.floor(fs.statSync(path.join(ROOT, 'index.html')).mtimeMs).toString(36),
+  ].join('-');
+
+  html = html.replace('</head>',
+    '<script>window.FT_BUILD=' + JSON.stringify(buildId) + ';</script>\n' + PWA_HEAD + '\n</head>');
   html = html.replace('</body>', SW_REGISTER + '\n</body>');
 
   fs.writeFileSync(path.join(OUT, 'index.html'), html);
@@ -119,14 +129,6 @@ function build(isDev) {
   fs.cpSync(path.join(ROOT, 'public'), OUT, { recursive: true });
 
   // ── Cache busting ────────────────────────────────────────────────────────
-  // The service worker keys its cache on this id, so every build reaches
-  // devices instead of serving a stale shell forever.
-  const buildId = [
-    require('./package.json').version,
-    isDev ? 'dev' : 'live',
-    Math.floor(fs.statSync(path.join(ROOT, 'index.html')).mtimeMs).toString(36),
-  ].join('-');
-
   const swPath = path.join(OUT, 'sw.js');
   fs.writeFileSync(swPath, fs.readFileSync(swPath, 'utf8').split('__BUILD_ID__').join(buildId));
 
