@@ -48,58 +48,6 @@
     .scroll-area::-webkit-scrollbar-thumb, .modal::-webkit-scrollbar-thumb { background:var(--border2); border-radius:999px; border:3px solid transparent; background-clip:padding-box; }
     .scroll-area::-webkit-scrollbar-thumb:hover { background:#3a3f63; background-clip:padding-box; }
     .scroll-area::-webkit-scrollbar-track, .modal::-webkit-scrollbar-track { background:transparent; }
-    .sug-scroll::-webkit-scrollbar { height:8px; }
-    .sug-scroll::-webkit-scrollbar-thumb { background:var(--border2); border-radius:999px; }
-    .sug-scroll::-webkit-scrollbar-track { background:transparent; }
-
-    #loading { position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; flex-direction:column; gap:16px; z-index:999; }
-    .spinner { width:38px; height:38px; border:3px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin 0.75s linear infinite; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-
-    /* ── APP SHELL ── */
-    .app { display:grid; grid-template-columns:var(--sidebar) 1fr; height:100vh; width:100vw; }
-
-    .sidebar { background:linear-gradient(180deg,#0e0f1a,#0b0c14); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:20px 14px; gap:6px; overflow:hidden; }
-    .brand { display:flex; align-items:center; gap:12px; padding:6px 8px 20px; }
-    .brand-mark { width:40px; height:40px; border-radius:12px; background:linear-gradient(135deg,#6366f1,#a78bfa); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 8px 20px -5px rgba(99,102,241,0.65); }
-    .brand-text { font-size:19px; font-weight:800; letter-spacing:-0.02em; white-space:nowrap; }
-    .nav-cap { font-size:9px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.14em; padding:6px 12px; }
-    .nav { display:flex; flex-direction:column; gap:4px; flex:1; }
-    .nav-item { display:flex; align-items:center; gap:13px; padding:11px 13px; border-radius:12px; color:var(--muted); font-size:14px; font-weight:600; transition:all 0.15s; white-space:nowrap; }
-    .nav-item:hover { background:var(--card); color:var(--text); }
-    .nav-item.active { background:rgba(99,102,241,0.13); color:#cdd0ff; }
-    .nav-item.active .nav-ico { color:var(--accent); }
-    .nav-ico { display:flex; align-items:center; justify-content:center; width:20px; flex-shrink:0; }
-    .nav-label { white-space:nowrap; }
-    .sidebar-foot { margin-top:auto; }
-    .weight-chip-side { width:100%; display:flex; align-items:center; gap:12px; padding:11px 13px; border-radius:12px; background:var(--card); border:1px solid var(--border); transition:all 0.15s; }
-    .weight-chip-side:hover { border-color:var(--accent); }
-    .weight-chip-side .nav-ico { color:var(--accent); }
-    .ws-k { font-size:9px; color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:0.08em; }
-    .ws-v { font-size:13px; font-weight:700; margin-top:1px; }
-
-    .main { display:flex; flex-direction:column; height:100vh; min-width:0; overflow:hidden; }
-    .topbar { flex-shrink:0; height:68px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 26px; gap:14px; background:rgba(10,11,18,0.8); backdrop-filter:blur(10px); }
-    .topbar-left { min-width:0; display:flex; align-items:center; }
-    .topbar-title { font-size:21px; font-weight:800; letter-spacing:-0.02em; }
-    .topbar-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
-    .datenav { display:flex; align-items:center; gap:9px; }
-    .date-btn { width:35px; height:35px; border-radius:10px; background:var(--card); border:1px solid var(--border); color:var(--muted); display:flex; align-items:center; justify-content:center; transition:all 0.15s; flex-shrink:0; }
-    .date-btn:hover { color:var(--text); border-color:var(--border2); background:var(--card2); }
-    .datenav-label { text-align:center; min-width:200px; }
-    .datenav-main { font-size:15px; font-weight:700; letter-spacing:-0.01em; white-space:nowrap; }
-    .datenav-sub { font-size:10px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.1em; margin-top:1px; }
-    .today-pill { padding:8px 13px; border-radius:10px; background:rgba(99,102,241,0.13); border:1px solid rgba(99,102,241,0.3); color:var(--accent); font-size:12px; font-weight:700; white-space:nowrap; transition:all 0.15s; }
-    .today-pill:hover { background:rgba(99,102,241,0.22); }
-    .weight-chip { padding:10px 15px; border-radius:11px; background:var(--card); border:1px solid var(--border); font-size:13px; font-weight:700; color:var(--text); transition:all 0.15s; white-space:nowrap; }
-    .weight-chip:hover { border-color:var(--accent); color:var(--accent); }
-    .btn-accent { display:flex; align-items:center; gap:7px; padding:10px 17px; border-radius:11px; background:var(--accent); color:#fff; font-size:13px; font-weight:700; transition:all 0.15s; white-space:nowrap; box-shadow:0 4px 14px -3px rgba(99,102,241,0.55); }
-    .btn-accent:hover { background:#5457e0; transform:translateY(-1px); }
-    .btn-accent:active { transform:translateY(0); }
-
-    .scroll-area { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; }
-    .content { padding:24px 26px 52px; max-width:1480px; margin:0 auto; width:100%; }
-    .section-label { font-size:10px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:0.13em; margin-bottom:11px; }
     .card { background:var(--card); border-radius:var(--r); border:1px solid var(--border); overflow:hidden; }
 
     /* ── DASHBOARD GRID ── */
@@ -190,19 +138,6 @@
 
     .ring-wrap { position:relative; display:inline-block; }
     .ring-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
-
-    /* ── SUGGESTIONS ── */
-    .sug-scroll { display:flex; gap:12px; overflow-x:auto; padding-bottom:6px; }
-    .sug-card { flex-shrink:0; width:182px; background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:15px; display:flex; flex-direction:column; gap:9px; transition:all 0.15s; }
-    .sug-card:hover { border-color:var(--border2); transform:translateY(-2px); }
-    .sug-label { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:3px 9px; border-radius:999px; }
-    .sug-name { font-size:13px; font-weight:800; line-height:1.3; }
-    .sug-desc { font-size:11px; color:var(--muted); line-height:1.45; flex:1; }
-    .sug-cal { font-size:18px; font-weight:800; color:var(--cal); letter-spacing:-0.02em; }
-    .sug-pills, .sug-tags { display:flex; gap:4px; flex-wrap:wrap; }
-    .sug-tag { font-size:9px; font-weight:700; padding:2px 8px; border-radius:999px; }
-    .sug-log-btn { width:100%; padding:9px; background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:9px; color:var(--accent); font-size:12px; font-weight:700; transition:all 0.15s; }
-    .sug-log-btn:hover { background:rgba(99,102,241,0.2); }
 
     /* ── MODALS ── */
     .overlay { position:fixed; inset:0; background:rgba(6,7,12,0.72); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:200; padding:24px; }
@@ -597,21 +532,6 @@
     if (m) { const u=(m[2]||'').trim().toLowerCase(); return {qty:m[1], unit:UNITS.includes(u)?u:'g'}; }
     return {qty:'1',unit:'g'};
   };
-
-  const SUGGESTIONS = [
-    { label:'High Protein', name:'Cottage Cheese Bowl',         desc:'Cottage cheese, strawberries, crushed almonds',                cal:235, p:26, c:20, fat:6,  fiber:3, tags:['High Protein','Quick'] },
-    { label:'Low Carb',     name:'Brussels Sprouts & Chicken',  desc:'Grilled chicken, roasted Brussels sprouts, garlic, olive oil', cal:315, p:38, c:14, fat:11, fiber:6, tags:['High Protein','Low Carb'] },
-    { label:'Keto',         name:'Cottage Cheese Scramble',     desc:'3 eggs, cottage cheese, wilted spinach, black pepper',         cal:285, p:33, c:4,  fat:15, fiber:1, tags:['High Protein','Keto'] },
-    { label:'Low Carb',     name:'Steak & Brussels Hash',       desc:'Sirloin, sautéed Brussels sprouts & onions, eggs over-easy',  cal:410, p:44, c:14, fat:19, fiber:5, tags:['High Protein','Low Carb'] },
-    { label:'High Protein', name:'Protein Power Bowl',          desc:'Ground beef, cottage cheese, steamed broccoli, hot sauce',    cal:420, p:52, c:8,  fat:18, fiber:5, tags:['High Protein','Low Carb'] },
-    { label:'Low Carb',     name:'Brussels Sprouts & Bacon',    desc:'Roasted Brussels sprouts, bacon, balsamic glaze',             cal:220, p:12, c:16, fat:13, fiber:5, tags:['Low Carb'] },
-    { label:'Snack',        name:'Cottage Cheese Dip Plate',    desc:'Blended cottage cheese, herbs, bell pepper, cucumber',        cal:145, p:16, c:9,  fat:4,  fiber:4, tags:['High Protein','Snack'] },
-    { label:'Low Carb',     name:'Greek Yogurt Chicken Bowl',   desc:'Chicken, Greek yogurt sauce, cucumber, dill, lemon',          cal:295, p:42, c:8,  fat:8,  fiber:1, tags:['High Protein','Low Carb'] },
-    { label:'Keto',         name:'Egg & Cottage Cheese Bake',   desc:'4 eggs baked over cottage cheese, spinach, cherry tomatoes',  cal:310, p:36, c:6,  fat:16, fiber:2, tags:['High Protein','Keto'] },
-    { label:'High Protein', name:'Tuna & Brussels Stir-fry',   desc:'Tuna, roasted Brussels sprouts, soy sauce, sesame oil',       cal:255, p:34, c:12, fat:7,  fiber:5, tags:['High Protein','Low Carb'] },
-    { label:'Low Carb',     name:'Ground Pork Skillet',         desc:'Ground pork, zucchini, garlic, crushed red pepper',           cal:290, p:24, c:6,  fat:19, fiber:2, tags:['Low Carb'] },
-    { label:'Keto',         name:'Cottage Cheese & Salmon',     desc:'Cottage cheese alongside baked salmon, lemon, dill',          cal:295, p:38, c:4,  fat:13, fiber:0, tags:['High Protein','Keto'] },
-  ];
 
   // ── UTILS ────────────────────────────────────────────────────────────────────
   // Storage goes through FTSync: still local-first and synchronous, but each
@@ -1531,60 +1451,6 @@
     );
   }
 
-  // ── MEAL SUGGESTIONS ─────────────────────────────────────────────────────────
-  const TAG_STYLE = {
-    'High Protein': {bg:'rgba(167,139,250,0.14)',color:'var(--prot)'},
-    'Low Carb':     {bg:'rgba(52,211,153,0.14)', color:'var(--fiber)'},
-    'Keto':         {bg:'rgba(52,211,153,0.14)', color:'var(--fiber)'},
-    'Quick':        {bg:'rgba(251,191,36,0.14)', color:'var(--carb)'},
-    'Snack':        {bg:'rgba(251,146,60,0.14)', color:'var(--fat)'},
-  };
-  const LABEL_STYLE = {
-    'High Protein': {bg:'rgba(167,139,250,0.18)',color:'var(--prot)'},
-    'Low Carb':     {bg:'rgba(52,211,153,0.18)', color:'var(--fiber)'},
-    'Keto':         {bg:'rgba(52,211,153,0.18)', color:'var(--fiber)'},
-    'Snack':        {bg:'rgba(251,146,60,0.18)', color:'var(--fat)'},
-  };
-
-  function MealSuggestions({ onQuickAdd }) {
-    return (
-      <div>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:11}}>
-          <div className="section-label" style={{marginBottom:0}}>Meal Ideas</div>
-          <div style={{fontSize:9,color:'var(--muted)',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.07em'}}>Scroll →</div>
-        </div>
-        <div className="sug-scroll">
-          {SUGGESTIONS.map((s,i) => {
-            const ls = LABEL_STYLE[s.label]||{bg:'rgba(99,102,241,0.18)',color:'var(--accent)'};
-            return (
-              <div key={i} className="sug-card">
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                  <span className="sug-label" style={{background:ls.bg,color:ls.color}}>{s.label}</span>
-                  <span className="sug-cal">{s.cal}</span>
-                </div>
-                <div className="sug-name">{s.name}</div>
-                <div className="sug-desc">{s.desc}</div>
-                <div className="sug-pills">
-                  <span className="pill" style={{background:'rgba(167,139,250,0.14)',color:'var(--prot)'}}>P {s.p}g</span>
-                  <span className="pill" style={{background:'rgba(251,191,36,0.14)',color:'var(--carb)'}}>C {s.c}g</span>
-                  <span className="pill" style={{background:'rgba(251,146,60,0.14)',color:'var(--fat)'}}>F {s.fat}g</span>
-                  {s.fiber > 0 && <span className="pill" style={{background:'rgba(52,211,153,0.14)',color:'var(--fiber)'}}>Fi {s.fiber}g</span>}
-                </div>
-                <div className="sug-tags">
-                  {s.tags.map(t => {
-                    const ts=TAG_STYLE[t]||{bg:'var(--card2)',color:'var(--muted)'};
-                    return <span key={t} className="sug-tag" style={{background:ts.bg,color:ts.color}}>{t}</span>;
-                  })}
-                </div>
-                <button className="sug-log-btn" onClick={() => onQuickAdd(s)}>+ Log This</button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
   // ── MEAL ROW ─────────────────────────────────────────────────────────────────
   function MealRow({ meal, onDelete, onEdit }) {
     const [confirming, setConfirming] = useState(false);
@@ -1616,12 +1482,11 @@
   }
 
   // ── DASHBOARD ────────────────────────────────────────────────────────────────
-  function DashboardView({ day, days, goals, foodLibrary, sleepLogs, onAddMeal, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
+  function DashboardView({ day, days, goals, foodLibrary, sleepLogs, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
     const [showWater, setShowWater] = useState(false);
     const [showWorkout, setShowWorkout] = useState(false);
     const [showSleep, setShowSleep] = useState(false);
     const [editingMeal, setEditingMeal] = useState(null);
-    const [quickAddData, setQuickAddData] = useState(null);
 
     const meals    = day.meals    || [];
     const workouts = day.workouts || [];
@@ -1790,28 +1655,21 @@
               </div>
             </div>
 
-            <MealSuggestions onQuickAdd={s => setQuickAddData({
-              name:s.name, mealType:'Snack', calories:s.cal,
-              protein:s.p, carbs:s.c, fat:s.fat, fiber:s.fiber, servingSize:s.desc
-            })} />
           </div>
         </div>
 
         {showWater   && <WaterModal   onSave={oz=>{onAddWater(oz);setShowWater(false);}}  onClose={()=>setShowWater(false)}/>}
         {showWorkout && <WorkoutModal onSave={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
         {showSleep   && <SleepModal   onSave={s=>{onLogSleep(s);setShowSleep(false);}}     onClose={()=>setShowSleep(false)}/>}
-        {(editingMeal||quickAddData) && (
+        {editingMeal && (
           <AddFoodModal
             foodLibrary={foodLibrary}
             days={days}
-            initialMeal={editingMeal||quickAddData}
-            onSave={meal => {
-              if (editingMeal) { onEditMeal(editingMeal.id, meal); setEditingMeal(null); }
-              else { onAddMeal(meal); setQuickAddData(null); }
-            }}
+            initialMeal={editingMeal}
+            onSave={meal => { onEditMeal(editingMeal.id, meal); setEditingMeal(null); }}
             onAddToLibrary={onAddToLibrary}
             onRemoveFromLibrary={onRemoveFromLibrary}
-            onClose={() => { setEditingMeal(null); setQuickAddData(null); }}
+            onClose={() => setEditingMeal(null)}
           />
         )}
       </div>
@@ -2370,7 +2228,7 @@
 
           <div className="scroll-area">
             {tab==='dashboard' && <DashboardView day={currentDay} days={days} goals={goals} foodLibrary={foodLib} sleepLogs={sleepLogs}
-              onAddMeal={addMeal} onDeleteMeal={deleteMeal} onEditMeal={editMeal}
+              onDeleteMeal={deleteMeal} onEditMeal={editMeal}
               onAddWater={addWater} onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
               onAddWorkout={addWorkout} onDeleteWorkout={deleteWorkout} onLogSleep={logSleep}
               onOpenAddFood={()=>setShowAddFood(true)}/>}
