@@ -50,6 +50,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "public/icons/icon.ico"
@@ -60,7 +66,11 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "FitTrack",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "FitTrack-${version}-setup.exe"
+    },
+    "portable": {
+      "artifactName": "FitTrack-${version}-portable.exe"
     }
   }
 }

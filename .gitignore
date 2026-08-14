@@ -2,6 +2,11 @@ node_modules/
 
 # Build output
 dist/
+
+# Shipped binaries live here, but ~83MB exes have no business in git — only the
+# folder's README is tracked. Attach builds to a GitHub release instead.
+release/*
+!release/README.md
 dist-web/
 dist-web-dev/
 dist-pages/
