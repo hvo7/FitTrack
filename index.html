@@ -518,6 +518,50 @@
     return recent ? { ...parseQtyUnit(recent.servingSize), from:'log', date:recent.date } : null;
   };
 
+  /* Re-price every meal already logged from a food whose definition changed.
+   *
+   * Correcting a food's macros should correct the history that came from it —
+   * otherwise the numbers you fixed stay wrong everywhere they were used. Each
+   * meal is rescaled to the amount it was actually logged at, so a 25g entry
+   * and a 175g entry both end up right rather than both taking the new values
+   * verbatim. Meals whose amount cannot be converted to the food's new basis
+   * are left untouched: guessing would corrupt them. */
+  const restateLoggedMeals = (days, prevFood, nextFood) => {
+    const key = (prevFood?.name || nextFood?.name || '').trim().toLowerCase();
+    if (!key) return days;
+    const basis = foodBasis(nextFood, days);
+    let touched = false;
+
+    const next = {};
+    Object.entries(days || {}).forEach(([date, day]) => {
+      let changed = false;
+      const meals = (day.meals || []).map(meal => {
+        if ((meal.name || '').trim().toLowerCase() !== key) return meal;
+
+        const amt = meal.servingSize ? parseQtyUnit(meal.servingSize) : null;
+        // No amount recorded means the meal took the food's macros as-is, so
+        // it should keep doing that.
+        const ratio = amt ? (basis ? ratioBetween(basis.qty, basis.unit, amt.qty, amt.unit) : null) : 1;
+        if (ratio == null) return meal;
+
+        const sc = v => Math.round((v || 0) * ratio * 10) / 10;
+        const updated = { ...meal,
+          name: nextFood.name || meal.name,
+          calories: Math.round((nextFood.calories || 0) * ratio),
+          protein: sc(nextFood.protein), carbs: sc(nextFood.carbs),
+          fat: sc(nextFood.fat), fiber: sc(nextFood.fiber || 0) };
+
+        if (JSON.stringify(updated) === JSON.stringify(meal)) return meal;
+        changed = true;
+        return updated;
+      });
+      next[date] = changed ? { ...day, meals } : day;
+      if (changed) touched = true;
+    });
+
+    return touched ? next : days;
+  };
+
   /* The most recent time a food was actually logged, used to recover what a
    * library entry's macros describe when the entry itself never recorded it.
    * A log is the better witness anyway: it is what the numbers were used for. */
@@ -699,7 +743,7 @@
   }
 
   // ── ADD FOOD MODAL ───────────────────────────────────────────────────────────
-  function AddFoodModal({ foodLibrary, onSave, onAddToLibrary, onRemoveFromLibrary, onClose, initialMeal }) {
+  function AddFoodModal({ foodLibrary, days, onSave, onAddToLibrary, onRemoveFromLibrary, onClose, initialMeal }) {
     const isEditing = !!initialMeal;
     const inLib = nm => foodLibrary.some(f => (f.name||'').trim().toLowerCase() === (nm||'').trim().toLowerCase());
     const qs = initialMeal?.servingSize ? parseQtyUnit(initialMeal.servingSize) : {qty:'1', unit:'g'};
@@ -764,21 +808,21 @@
       : [];
 
     const prefill = food => {
-      const sq = food.servingQty || food.grams || 1;
-      const su = food.servingUnit || (food.grams ? 'g' : 'serving');
+      const fb = foodBasis(food, days);
+      const sq = fb ? fb.qty : 1;
+      const su = fb ? fb.unit : 'serving';
       setForm(f => ({ ...f, name:food.name, calories:String(food.calories), protein:String(food.protein),
         carbs:String(food.carbs), fat:String(food.fat), fiber:String(food.fiber||0),
         qty:String(sq), unit:su }));
-      setBaseFood((food.grams||food.servingQty) ? {...food, servingQty:sq, servingUnit:su} : null);
-      setBasis(basisFrom(food, sq, su));
+      setBaseFood(fb ? {...food, servingQty:sq, servingUnit:su} : null);
+      setBasis(fb ? basisFrom(food, sq, su) : null);
       setSearch('');
     };
 
     const quickAdd = food => {
       const inputQty = parseFloat(form.qty)||1;
-      const sq = food.servingQty || food.grams || 1;
-      const su = food.servingUnit || (food.grams ? 'g' : 'serving');
-      const ratio = ratioBetween(sq, su, inputQty, form.unit) ?? 1;
+      const fb = foodBasis(food, days);
+      const ratio = fb ? (ratioBetween(fb.qty, fb.unit, inputQty, form.unit) ?? 1) : 1;
       const sc = v => Math.round((v||0) * ratio * 10) / 10;
       onSave({ id:Date.now(), name:food.name, mealType:form.mealType,
         calories:sc(food.calories), protein:sc(food.protein), carbs:sc(food.carbs),
@@ -1572,7 +1616,7 @@
   }
 
   // ── DASHBOARD ────────────────────────────────────────────────────────────────
-  function DashboardView({ day, goals, foodLibrary, sleepLogs, onAddMeal, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
+  function DashboardView({ day, days, goals, foodLibrary, sleepLogs, onAddMeal, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
     const [showWater, setShowWater] = useState(false);
     const [showWorkout, setShowWorkout] = useState(false);
     const [showSleep, setShowSleep] = useState(false);
@@ -1759,6 +1803,7 @@
         {(editingMeal||quickAddData) && (
           <AddFoodModal
             foodLibrary={foodLibrary}
+            days={days}
             initialMeal={editingMeal||quickAddData}
             onSave={meal => {
               if (editingMeal) { onEditMeal(editingMeal.id, meal); setEditingMeal(null); }
@@ -2228,7 +2273,12 @@
     });
     const deleteFromLib = id => setFoodLib(prev => prev.filter(f=>f.id!==id));
     const removeFromLib = nm => setFoodLib(prev => prev.filter(f => (f.name||'').trim().toLowerCase() !== (nm||'').trim().toLowerCase()));
-    const updateInLib   = f  => setFoodLib(prev => prev.map(e => e.id===f.id ? f : e));
+    const updateInLib   = f  => {
+      const before = foodLib.find(e => e.id === f.id);
+      setFoodLib(prev => prev.map(e => e.id===f.id ? f : e));
+      // A corrected food should correct the history it produced.
+      setDays(prev => restateLoggedMeals(prev, before, f));
+    };
     const logFoodToday  = m  => updateDay(TODAY, d => ({ ...d, meals:[...(d.meals||[]),m] }));
 
     const currentDay = getDay(date);
@@ -2319,7 +2369,7 @@
           </header>
 
           <div className="scroll-area">
-            {tab==='dashboard' && <DashboardView day={currentDay} goals={goals} foodLibrary={foodLib} sleepLogs={sleepLogs}
+            {tab==='dashboard' && <DashboardView day={currentDay} days={days} goals={goals} foodLibrary={foodLib} sleepLogs={sleepLogs}
               onAddMeal={addMeal} onDeleteMeal={deleteMeal} onEditMeal={editMeal}
               onAddWater={addWater} onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
               onAddWorkout={addWorkout} onDeleteWorkout={deleteWorkout} onLogSleep={logSleep}
@@ -2336,7 +2386,7 @@
         </div>
 
         {showWL && <LogWeightModal current={currentDay.weight} onSave={logWeight} onClose={()=>setWL(false)}/>}
-        {showAddFood && <AddFoodModal foodLibrary={foodLib}
+        {showAddFood && <AddFoodModal foodLibrary={foodLib} days={days}
           onSave={m=>{addMeal(m);setShowAddFood(false);}}
           onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
           onClose={()=>setShowAddFood(false)}/>}
