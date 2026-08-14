@@ -325,7 +325,37 @@
         emitRemote(row.key, row.value);
         setStatus('synced');
       })
-      .subscribe();
+      .subscribe(function (state) {
+        // A socket that drops stays dropped unless we ask again. Reconnecting
+        // matters more than usual here because the poll below is deliberately
+        // slow, so realtime is what makes another device feel instant.
+        if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' || state === 'CLOSED') {
+          if (realtimeRetry) clearTimeout(realtimeRetry);
+          realtimeRetry = setTimeout(setupRealtime, 5000);
+        }
+      });
+  }
+  var realtimeRetry = null;
+
+  // ── STAYING FRESH ──────────────────────────────────────────────────────────
+  /* Realtime is the fast path, not the only path.
+   *
+   * A window left open for hours would otherwise never learn about anything
+   * until it was reloaded — which is why a phone, reopened fresh each time,
+   * appeared to sync while a desktop window sitting open all day did not. It is
+   * also the difference between working and not working at all when the table
+   * is missing from the realtime publication, or a laptop wakes to a dead
+   * socket. So pull again whenever this window is about to be looked at, and on
+   * a slow timer underneath that as a floor. */
+  var POLL_MS = 60000;
+  var lastPull = 0;
+
+  function refresh(force) {
+    if (!client || !session) return;
+    var now = Date.now();
+    if (!force && now - lastPull < 5000) return; // focus events arrive in bursts
+    lastPull = now;
+    pullAll();
   }
 
   function teardownRealtime() {
@@ -457,7 +487,21 @@
 
   // Don't lose the last few seconds of edits when the window closes.
   window.addEventListener('beforeunload', flushAll);
+
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') flushAll();
+    else refresh();
   });
+
+  /* Focus, not just visibility: a desktop window sitting behind another one is
+   * still `visible`, so visibilitychange never fires when you click back into
+   * it. Focus is the signal that someone is about to read the screen. */
+  window.addEventListener('focus', function () { refresh(); });
+
+  // Coming back online is the other moment we are likely to be stale.
+  window.addEventListener('online', function () { refresh(true); setupRealtime(); });
+
+  setInterval(function () {
+    if (document.visibilityState !== 'hidden') refresh();
+  }, POLL_MS);
 })();
