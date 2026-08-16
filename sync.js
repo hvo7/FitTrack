@@ -64,13 +64,72 @@
     return out;
   }
 
+  /* Tombstones. Merging lists by id means a deleted item would come back from
+   * whichever device had not heard about the deletion, so a delete is recorded
+   * as `removed[id] = when` rather than a silent disappearance. They are
+   * pruned after a month — by then every device has long since seen it. */
+  var TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+  function mergeRemoved(a, b) {
+    var out = {}, cutoff = Date.now() - TOMBSTONE_TTL_MS, id;
+    [a, b].forEach(function (src) {
+      for (id in (src || {})) {
+        var ts = Number(src[id]) || 0;
+        if (ts >= cutoff && ts > (out[id] || 0)) out[id] = ts;
+      }
+    });
+    return out;
+  }
+
+  /* Union two lists of {id} with the newer side winning any id present on
+   * both, and anything tombstoned dropped. */
+  function mergeItems(older, newer, removed) {
+    var map = Object.create(null), order = [];
+    [older, newer].forEach(function (arr) {
+      (arr || []).forEach(function (item) {
+        if (!item || item.id == null) return;
+        var id = String(item.id);
+        if (removed[id]) return;
+        if (!(id in map)) order.push(id);
+        map[id] = item;                  // the later pass wins
+      });
+    });
+    return order.map(function (id) { return map[id]; });
+  }
+
+  /* One day, edited on two devices.
+   *
+   * Taking the whole day from whichever device wrote last was the bug behind
+   * "logging on my phone didn't show up on my desktop": breakfast added on one
+   * and dinner on the other, on the same date, meant one of them was simply
+   * dropped. Merge the day's *contents* instead — meals and workouts union by
+   * id — and let recency decide only the genuinely single-valued fields. */
+  function mergeDay(local, remote, localNewer) {
+    if (!local) return remote;
+    if (!remote) return local;
+
+    var removed = mergeRemoved(local.removed, remote.removed);
+    var lTs = Number(local.updatedAt) || 0, rTs = Number(remote.updatedAt) || 0;
+    var localWins = lTs === rTs ? !!localNewer : lTs > rTs;
+    var older = localWins ? remote : local;
+    var newer = localWins ? local : remote;
+
+    return {
+      date: local.date || remote.date,
+      meals: mergeItems(older.meals, newer.meals, removed),
+      workouts: mergeItems(older.workouts, newer.workouts, removed),
+      waterOz: newer.waterOz != null ? newer.waterOz : older.waterOz,
+      weight: newer.weight != null ? newer.weight : (older.weight != null ? older.weight : null),
+      removed: removed,
+      updatedAt: Math.max(lTs, rTs),
+    };
+  }
+
   function mergeDays(local, remote, localNewer) {
     var out = {}, d;
     for (d in (remote || {})) out[d] = remote[d];
     for (d in (local || {})) {
-      // A date present on only one side is always kept. A date present on both
-      // is a real conflict — take whichever side was written more recently.
-      if (!(d in out) || localNewer) out[d] = local[d];
+      out[d] = (d in out) ? mergeDay(local[d], out[d], localNewer) : local[d];
     }
     return out;
   }
@@ -347,7 +406,10 @@
    * is missing from the realtime publication, or a laptop wakes to a dead
    * socket. So pull again whenever this window is about to be looked at, and on
    * a slow timer underneath that as a floor. */
-  var POLL_MS = 60000;
+  /* Tight enough that a second device feels close to live even with realtime
+   * unavailable, and cheap either way — it is five small rows, only while the
+   * window is actually on screen. */
+  var POLL_MS = 25000;
   var lastPull = 0;
 
   function refresh(force) {

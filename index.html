@@ -547,7 +547,7 @@
         changed = true;
         return updated;
       });
-      next[date] = changed ? { ...day, meals } : day;
+      next[date] = changed ? { ...day, meals, updatedAt: Date.now() } : day;
       if (changed) touched = true;
     });
 
@@ -589,6 +589,24 @@
     if (m) { const u=(m[2]||'').trim().toLowerCase(); return {qty:m[1], unit:UNITS.includes(u)?u:'g'}; }
     return {qty:'1',unit:'g'};
   };
+
+  /* Dismissing on a backdrop click must mean a press that *started* on the
+   * backdrop. Selecting text in a field and releasing the mouse past the
+   * modal's edge fires a click whose target is the overlay, which would
+   * otherwise throw away everything being typed.
+   *
+   * Module-level rather than per-component state because only one pointer
+   * press can be in flight at a time, and this way it is a plain function
+   * rather than a hook — safe to spread anywhere in a render. */
+  let pressBeganOnBackdrop = false;
+  const overlayProps = onClose => ({
+    className: 'overlay',
+    onMouseDown: e => { pressBeganOnBackdrop = e.target === e.currentTarget; },
+    onClick: e => {
+      if (e.target === e.currentTarget && pressBeganOnBackdrop) onClose();
+      pressBeganOnBackdrop = false;
+    },
+  });
 
   // ── UTILS ────────────────────────────────────────────────────────────────────
   // Storage goes through FTSync: still local-first and synchronous, but each
@@ -855,7 +873,7 @@
     };
 
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">{isEditing ? 'Edit Food' : 'Log Food'}</div>
 
@@ -992,7 +1010,7 @@
     const valid = name.trim() && kcal && parseFloat(kcal) > 0;
 
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Log Workout</div>
           <div className="field">
@@ -1039,7 +1057,7 @@
     const [val,  setVal]  = useState(current ? String(current) : '');
     const [time, setTime] = useState(nowTime);
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Log Weight</div>
           <div className="row2">
@@ -1065,7 +1083,7 @@
   function WaterModal({ onSave, onClose }) {
     const [val, setVal] = useState('');
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Add Water</div>
           <div className="field">
@@ -1101,7 +1119,7 @@
     const color = sleepQColor(hours);
 
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Log Sleep</div>
           <div className="sleep-hours-preview">
@@ -1142,7 +1160,7 @@
     const [f, setF] = useState({...goals});
     const n = k => e => setF(v=>({...v,[k]:parseFloat(e.target.value)||0}));
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Edit Goals</div>
           <div className="row2"><div className="field" style={{flex:1}}>
@@ -1173,7 +1191,7 @@
     const [f, setF] = useState({...profile});
     const s = k => e => setF(v=>({...v,[k]:e.target.value}));
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Edit Profile</div>
           <div className="field"><div className="field-lbl">Name</div><input className="input" placeholder="Your name" value={f.name||''} onChange={s('name')}/></div>
@@ -1239,7 +1257,7 @@
       onClose();
     };
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Edit Food</div>
 
@@ -1328,7 +1346,7 @@
       onClose();
     };
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div className="modal-title">Log Food</div>
           <div style={{marginBottom:14,padding:'13px 14px',background:'var(--card2)',borderRadius:'var(--rs)',border:'1px solid var(--border)'}}>
@@ -1392,7 +1410,7 @@
     const [loggingFood, setLoggingFood] = useState(null);
     const filtered = search.trim() ? library.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : library;
     return (
-      <div className="overlay" onClick={e => e.target===e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal">
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
             <div className="modal-title" style={{marginBottom:0}}>My Foods ({library.length})</div>
@@ -2015,7 +2033,7 @@
     };
 
     return (
-      <div className="overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div {...overlayProps(onClose)}>
         <div className="modal" style={{maxWidth:420}}>
           <div className="modal-title">Account &amp; Sync</div>
 
@@ -2165,14 +2183,24 @@
     const goals = profile?.goals ? { ...DEFAULT_GOALS, ...profile.goals } : DEFAULT_GOALS;
     const isToday = date === TODAY;
     const getDay   = d => days[d] || { date:d, meals:[], workouts:[], waterOz:0, weight:null };
-    const updateDay= (d, fn) => setDays(prev => ({ ...prev, [d]: fn(prev[d]||{date:d,meals:[],workouts:[],waterOz:0,weight:null}) }));
+    /* Every change stamps the day, because sync resolves same-day conflicts by
+     * recency and needs something better than the whole blob's timestamp. */
+    const updateDay= (d, fn) => setDays(prev => ({
+      ...prev,
+      [d]: { ...fn(prev[d]||{date:d,meals:[],workouts:[],waterOz:0,weight:null}), updatedAt: Date.now() },
+    }));
+
+    /* Deleting records a tombstone as well as removing the item. Without one,
+     * a device that had not yet heard about the deletion would merge the item
+     * straight back in. */
+    const tombstone = (d, id) => ({ ...(d.removed||{}), [id]: Date.now() });
 
     const addMeal       = m  => updateDay(date, d => ({ ...d, meals:[...(d.meals||[]),m] }));
-    const deleteMeal    = id => updateDay(date, d => ({ ...d, meals:(d.meals||[]).filter(m=>m.id!==id) }));
+    const deleteMeal    = id => updateDay(date, d => ({ ...d, meals:(d.meals||[]).filter(m=>m.id!==id), removed:tombstone(d,id) }));
     const editMeal      = (id,u) => updateDay(date, d => ({ ...d, meals:(d.meals||[]).map(m=>m.id===id?{...u,id}:m) }));
     const addWater      = oz => updateDay(date, d => ({ ...d, waterOz:Math.max(0,(d.waterOz||0)+oz) }));
     const addWorkout    = w  => updateDay(date, d => ({ ...d, workouts:[...(d.workouts||[]),w] }));
-    const deleteWorkout = id => updateDay(date, d => ({ ...d, workouts:(d.workouts||[]).filter(w=>w.id!==id) }));
+    const deleteWorkout = id => updateDay(date, d => ({ ...d, workouts:(d.workouts||[]).filter(w=>w.id!==id), removed:tombstone(d,id) }));
     const logWeight     = ({weight,time}) => {
       updateDay(date, d=>({...d,weight}));
       setProfile(p=>({...p,currentWeight:weight}));
