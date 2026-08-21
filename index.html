@@ -427,7 +427,33 @@
   if (FTSync.isDev) document.body.classList.add('is-dev');
 
   const ymd = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-  const TODAY = ymd(new Date());
+  /* Today's date, recomputed rather than frozen.
+   *
+   * This used to be a constant evaluated once when the script loaded, which
+   * meant a window left open overnight stayed on yesterday forever: it showed
+   * the wrong day, "Jump to Today" jumped to the wrong day, and anything logged
+   * went to the wrong date. That is why a meal logged on a freshly-opened phone
+   * appeared to never reach a long-running desktop — the data arrived, the
+   * desktop was just still looking at the previous day. */
+  const todayStr = () => ymd(new Date());
+
+  function useToday() {
+    const [today, setToday] = useState(todayStr);
+    useEffect(() => {
+      // A timer alone is not enough: a sleeping laptop does not fire them, so
+      // also re-check whenever the window is looked at again.
+      const check = () => setToday(prev => { const now = todayStr(); return now === prev ? prev : now; });
+      const id = setInterval(check, 30000);
+      window.addEventListener('focus', check);
+      document.addEventListener('visibilitychange', check);
+      return () => {
+        clearInterval(id);
+        window.removeEventListener('focus', check);
+        document.removeEventListener('visibilitychange', check);
+      };
+    }, []);
+    return today;
+  }
   const MEAL_TYPES = ['Breakfast','Lunch','Dinner','Snack'];
   const M_COLOR = { Breakfast:'#fbbf24', Lunch:'#34d399', Dinner:'#a78bfa', Snack:'#fb923c' };
 
@@ -617,7 +643,7 @@
   const fmtFull = d => new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
   const fmtShort= d => new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
   const addDays = (d,n) => { const dt=new Date(d+'T12:00:00'); dt.setDate(dt.getDate()+n); return ymd(dt); };
-  const daysUntil = d => { if(!d) return null; return Math.ceil((new Date(d+'T12:00:00')-new Date(TODAY+'T12:00:00'))/86400000); };
+  const daysUntil = d => { if(!d) return null; return Math.ceil((new Date(d+'T12:00:00')-new Date(todayStr()+'T12:00:00'))/86400000); };
   const totals  = meals => meals.reduce((a,m)=>({ calories:a.calories+(m.calories||0), protein:a.protein+(m.protein||0), carbs:a.carbs+(m.carbs||0), fat:a.fat+(m.fat||0), fiber:a.fiber+(m.fiber||0) }), {calories:0,protein:0,carbs:0,fat:0,fiber:0});
   const burned  = wkts  => (wkts||[]).reduce((a,w)=>a+(w.caloriesBurned||0),0);
   const pct     = (v,g) => Math.min(v/Math.max(g,1),1);
@@ -1101,7 +1127,7 @@
   }
 
   function SleepModal({ onSave, onClose }) {
-    const [bedDate,  setBedDate]  = useState(TODAY);
+    const [bedDate,  setBedDate]  = useState(todayStr);
     const [bedTime,  setBedTime]  = useState('22:00');
     const [wakeTime, setWakeTime] = useState('07:00');
 
@@ -1753,7 +1779,7 @@
 
   // ── HISTORY ──────────────────────────────────────────────────────────────────
   function HistoryView({ days, goals, onNavigate }) {
-    const last30 = Array.from({length:30}, (_,i) => addDays(TODAY, -(i+1)));
+    const last30 = Array.from({length:30}, (_,i) => addDays(todayStr(), -(i+1)));
     return (
       <div className="content">
         <div className="section-label">Past 30 Days</div>
@@ -2130,7 +2156,17 @@
     const [foodLib,    setFoodLib]    = useState(() => load('ft_library', SAMPLE_LIBRARY));
     const [weightLogs, setWeightLogs] = useState(() => load('ft_weight_logs', []));
     const [sleepLogs,  setSleepLogs]  = useState(() => load('ft_sleep_logs', []));
-    const [date,       setDate]       = useState(TODAY);
+    const today = useToday();
+    const [date,       setDate]       = useState(today);
+
+    /* When the day rolls over, move with it — but only if the user was looking
+     * at today. Someone reviewing last Tuesday should stay on last Tuesday. */
+    const prevToday = useRef(today);
+    useEffect(() => {
+      if (prevToday.current === today) return;
+      setDate(d => (d === prevToday.current ? today : d));
+      prevToday.current = today;
+    }, [today]);
     const [tab,        setTab]        = useState('dashboard');
     const [showWL,     setWL]         = useState(false);
     const [showAddFood,setShowAddFood]= useState(false);
@@ -2181,7 +2217,7 @@
     }, []); // eslint-disable-line
 
     const goals = profile?.goals ? { ...DEFAULT_GOALS, ...profile.goals } : DEFAULT_GOALS;
-    const isToday = date === TODAY;
+    const isToday = date === today;
     const getDay   = d => days[d] || { date:d, meals:[], workouts:[], waterOz:0, weight:null };
     /* Every change stamps the day, because sync resolves same-day conflicts by
      * recency and needs something better than the whole blob's timestamp. */
@@ -2222,7 +2258,7 @@
       // A corrected food should correct the history it produced.
       setDays(prev => restateLoggedMeals(prev, before, f));
     };
-    const logFoodToday  = m  => updateDay(TODAY, d => ({ ...d, meals:[...(d.meals||[]),m] }));
+    const logFoodToday  = m  => updateDay(today, d => ({ ...d, meals:[...(d.meals||[]),m] }));
 
     const currentDay = getDay(date);
 
@@ -2298,7 +2334,7 @@
                     <div className="datenav-sub">{relSub}</div>
                   </div>
                   <button className="date-btn" onClick={()=>setDate(d=>addDays(d,1))}><IcoChev dir="right" size={15}/></button>
-                  {!isToday && <button className="today-pill" onClick={()=>setDate(TODAY)}>Jump to Today</button>}
+                  {!isToday && <button className="today-pill" onClick={()=>setDate(today)}>Jump to Today</button>}
                 </div>
               ) : (
                 <div className="topbar-title">{tab==='history' ? 'History' : 'Goals & Profile'}</div>
