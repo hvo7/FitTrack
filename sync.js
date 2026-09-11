@@ -52,16 +52,18 @@
   // different days (or different foods) both survive. Only a genuine conflict
   // — the same day edited on both devices — falls back to newest-wins.
 
-  function mergeById(local, remote) {
-    var out = [], seen = Object.create(null);
-    (remote || []).concat(local || []).forEach(function (item) {
+  function mergeById(local, remote, localNewer) {
+    var map = Object.create(null), order = [];
+    var older = localNewer ? remote : local, newer = localNewer ? local : remote;
+    (older || []).concat(newer || []).forEach(function (item) {
       if (!item) return;
       var id = String(item.id != null ? item.id : JSON.stringify(item));
-      if (seen[id]) return;
-      seen[id] = true;
-      out.push(item);
+      if (!(id in map)) order.push(id);
+      // Per-food revisions survive unrelated edits elsewhere in the library.
+      // Archive is a revision too, so stale devices cannot resurrect a food.
+      if (!map[id] || (Number(item.updatedAt) || 0) >= (Number(map[id].updatedAt) || 0)) map[id] = item;
     });
-    return out;
+    return order.map(function (id) { return map[id]; });
   }
 
   /* Tombstones. Merging lists by id means a deleted item would come back from
@@ -91,7 +93,7 @@
         var id = String(item.id);
         if (removed[id]) return;
         if (!(id in map)) order.push(id);
-        map[id] = item;                  // the later pass wins
+        if (!map[id] || (Number(item.updatedAt) || 0) >= (Number(map[id].updatedAt) || 0)) map[id] = item;
       });
     });
     return order.map(function (id) { return map[id]; });
@@ -139,7 +141,7 @@
     if (remote == null) return local;
     if (key === 'ft_days') return mergeDays(local, remote, localNewer);
     if (key === 'ft_library' || key === 'ft_weight_logs' || key === 'ft_sleep_logs') {
-      return mergeById(local, remote);
+      return mergeById(local, remote, localNewer);
     }
     return localNewer ? local : remote; // ft_profile — a small scalar blob
   }
@@ -350,11 +352,19 @@
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id,env,key' })
       .then(function (res) {
-        if (res.error) { setStatus('error', res.error.message); return; }
+        if (res.error) { retryPush(res.error.message); return; }
         lastSeen[key] = json;
         if (!Object.keys(pending).length) setStatus('synced');
       })
-      .catch(function (e) { setStatus('error', String(e && e.message || e)); });
+      .catch(function (e) { retryPush(String(e && e.message || e)); });
+
+    function retryPush(message) {
+      // Keep the latest queued edit, or restore the failed write for retry.
+      if (!(key in pending)) pending[key] = value;
+      setStatus('error', message);
+      if (timers[key]) clearTimeout(timers[key]);
+      timers[key] = setTimeout(function () { pullAll(); }, 5000);
+    }
   }
 
   function flushAll() { Object.keys(pending).forEach(flush); }
@@ -378,11 +388,18 @@
         var json = JSON.stringify(row.value);
         if (json === lastSeen[row.key]) return; // our own write echoing back
 
+        // Realtime must reconcile too: replacing the local blob here discards
+        // pending offline edits even though the regular pull correctly merges.
+        var remoteTs = new Date(row.updated_at).getTime();
+        var local = (row.key in pending) ? pending[row.key] : localLoad(row.key, null);
+        var merged = merge(row.key, local, row.value, localStampOf(row.key) > remoteTs);
         lastSeen[row.key] = json;
-        localSave(row.key, row.value);
-        localStamp(row.key, new Date(row.updated_at).getTime());
-        emitRemote(row.key, row.value);
-        setStatus('synced');
+        localSave(row.key, merged);
+        localStamp(row.key, Math.max(localStampOf(row.key), remoteTs));
+        emitRemote(row.key, merged);
+        if (JSON.stringify(merged) !== json) queuePush(row.key, merged);
+        else { delete pending[row.key]; if(timers[row.key]) clearTimeout(timers[row.key]); }
+        if (!Object.keys(pending).length) setStatus('synced');
       })
       .subscribe(function (state) {
         // A socket that drops stays dropped unless we ask again. Reconnecting
@@ -455,6 +472,7 @@
 
     /* The app's single write path: cache locally, stamp it, queue a push. */
     save: function (key, value) {
+      if (JSON.stringify(localLoad(key, null)) === JSON.stringify(value)) return;
       localSave(key, value);
       localStamp(key, Date.now());
       queuePush(key, value);

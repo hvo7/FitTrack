@@ -1,6 +1,7 @@
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, session, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { enableLocalBundle } = require('./desktop-bundle');
 
 /* Which environment this window shows.
  *   FitTrack.exe            -> live
@@ -55,13 +56,13 @@ function createWindow() {
     // them; the PNG is only a fallback for other platforms.
     icon: path.join(__dirname, 'public', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon-512.png'),
     autoHideMenuBar: true,
-    backgroundColor: '#080812',
+    backgroundColor: '#111722',
     show: false,
   });
 
   loadEnv(mainWindow, currentEnv);
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => { if (!process.argv.includes('--smoke-test')) mainWindow.show(); });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -87,7 +88,8 @@ function createWindow() {
   ]));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await enableLocalBundle(session.defaultSession, net, __dirname, readAppUrl());
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -17,7 +17,8 @@ index.html ──┬─> Electron  ──> FitTrack.exe        (desktop)
              └─> sync.js   ──> Supabase (Postgres) (account + cross-device sync)
 ```
 
-The app is a single self-contained `index.html`. `build.js` precompiles the JSX
+The app UI lives in `index.html`, with shared nutrition logic in `food-model.js`
+and the visual theme in `theme.css`. `build.js` precompiles the JSX
 with esbuild so the browser never has to load a 3MB Babel compiler — which is
 the difference between an instant load and a two-second white screen on a phone.
 
@@ -139,19 +140,23 @@ second.
 Storage is five JSON blobs — `ft_profile`, `ft_days`, `ft_library`,
 `ft_weight_logs`, `ft_sleep_logs` — kept in one key/value table.
 
-**Conflicts.** Naive last-write-wins would quietly lose data when you log
-breakfast on your phone and dinner on your desktop before either syncs. So
-merges are structural instead:
+**Conflicts.** Merges are structural during both initial pulls and realtime
+updates:
 
-- `ft_days` merges per date — different days from both devices all survive; the
-  same day edited on both falls back to whichever was written later
-- the library and log arrays merge by `id`
+- `ft_days` merges per date, then meals and workouts by ID. Per-entry revisions
+  decide conflicts between edited logs; deleted logs carry tombstones.
+- Food records merge by stable ID and per-food `updatedAt`. Archive/restore is
+  an edit, so an older copy does not resurrect archived foods.
+- Weight and sleep arrays merge by ID; single-valued day fields use day recency.
 - `ft_profile` is a small blob, so newest wins
 
 Writes are held back until the first pull has reconciled with the server, so a
 device that has been closed for a while cannot overwrite newer work on startup.
 If that pull fails the app stays local-only and retries with a backoff, rather
 than pushing a stale view of the world.
+
+Failed pushes remain queued for reconciliation and retry. Unchanged saves do
+not rewrite local storage or update timestamps.
 
 **With no Supabase configured**, all of this is inert: FitTrack behaves exactly
 as it did before, saving to that one device.
@@ -161,7 +166,9 @@ as it did before, saving to that one device.
 ## Layout
 
 ```
-index.html                    the whole app (edit this)
+index.html                    app views, forms and React state
+food-model.js                 unit conversion, food identity and nutrition resolution
+theme.css                     slate / blue theme and responsive home screen
 config.js                     Supabase URL + anon key + deployed URL
 sync.js                       cloud sync, auth, environment handling
 main.js                       Electron shell
@@ -171,3 +178,64 @@ supabase/schema.sql           run once in the SQL editor
 tools/                        icon generator, page assembler, dev server
 .github/workflows/deploy.yml  builds both environments, publishes to Pages
 ```
+
+## Food database and logging
+
+- Use **Food database → New food** to enter nutrition for a label amount,
+  such as **30 g**. Add equivalents for that same amount, such as **2 slices**
+  or **1 scoop**. Weight units and US volume units convert within their own
+  families automatically. Converting between weight, volume, and pieces
+  requires an explicit food-specific equivalent.
+- **Log food** offers recent foods and remembers the last amount used. Switching
+  units preserves the amount eaten; editing the quantity changes the portion.
+  A serving means the complete label amount (except when the label itself is
+  expressed as multiple servings).
+- Each saved-food log stores a `foodId`, `quantity`, and `unit`, plus a nutrition
+  snapshot. Displayed nutrition is derived from the current food definition,
+  using a single indexed pass through the diary. Changing a food's macros,
+  label amount, or name updates all linked historical totals immediately.
+  Diary dates and recorded quantities stay unchanged; no bulk history rewrite
+  is needed for each database correction.
+- The food editor previews the number of linked logs and days affected. It
+  prevents removing conversions still used by those logs. For example, when
+  changing a gram-based label to pieces, keep a gram equivalent for old logs.
+- **Archive** removes a food from normal search while preserving its record and
+  history. Enable **Archived** to restore it. Log deletion has an **Undo** action.
+- Duplicate food names and invalid amounts/macros are rejected. Use distinct
+  names for different brands or preparations. One-time entries can be saved
+  without adding to the database and retain their own nutrition.
+
+Existing logs are linked automatically only when their normalized food name
+matches exactly one database record and their recorded amount can be converted.
+Ambiguous or unparseable entries keep their saved nutrition and show as
+unlinked. Edit one and choose **Link to a saved food**, then review the amount.
+An unavailable record or conversion displays a review message and the stored
+snapshot instead of guessing. Archived records continue to resolve normally.
+
+All devices need the updated app to display derived historical nutrition.
+This change keeps the existing Supabase schema and local storage keys; no SQL
+migration is required. Sync merges are client-side and are not a transactional
+multi-user database protocol.
+
+### Mobile updates
+
+The installed phone app uses the GitHub Pages release. Open it while online to
+get the latest version. If an update notice appears, finish the current entry
+and choose **Reload app**. Closing and reopening the app also loads the latest
+published screen. Keep the existing home-screen installation so its local data
+and sign-in remain available.
+
+App scripts and styles have versioned URLs, and live/dev offline caches are
+isolated. A new offline bundle activates only after its required files download
+successfully. `node tests/pwa-smoke.cjs` checks updates, offline reload/logging,
+and separate live/dev caches after `npm run build:pages`.
+
+### Verification commands
+
+`npm test` runs unit and sync regression tests. `npm run build:pages` builds the
+live and dev bundles. With Playwright and a Chromium browser installed,
+`node tests/browser-smoke.cjs` runs isolated browser checks against `dist-web`;
+set `PLAYWRIGHT_CHANNEL` to change its default browser (`msedge`). It uses
+synthetic local data with cloud configuration disabled, and checks logging,
+unit conversion, historical corrections, reload, archive/restore, undo, food
+creation, and responsive layouts.

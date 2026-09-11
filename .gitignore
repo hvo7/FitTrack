@@ -10,6 +10,8 @@ release/*
 dist-web/
 dist-web-dev/
 dist-pages/
+dist-desktop-web/
+dist-desktop-web-dev/
 *.log
 
 # Local secrets. config.js holds only public client keys and IS committed.

@@ -10,13 +10,14 @@
  */
 
 const BUILD = '__BUILD_ID__';
-const CACHE = 'fittrack-' + BUILD;
+const CACHE_PREFIX = 'ft-app-' + encodeURIComponent(self.registration.scope) + '-';
+const CACHE = CACHE_PREFIX + BUILD;
+const APP_ASSETS = ['config.js','sync.js','food-model.js','theme.css'];
 
 const PRECACHE = [
   './',
   './index.html',
-  './config.js',
-  './sync.js',
+  ...APP_ASSETS.map(name => './' + name + '?build=' + BUILD),
   './lib/react.min.js',
   './lib/react-dom.min.js',
   './lib/supabase.min.js',
@@ -28,8 +29,8 @@ const PRECACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE)
-      // Individually, so one 404 cannot fail the whole install.
-      .then((c) => Promise.all(PRECACHE.map((u) => c.add(u).catch(() => {}))))
+      // Keep the previous worker active if the new offline bundle is incomplete.
+      .then((c) => c.addAll(PRECACHE))
       .then(() => self.skipWaiting())
   );
 });
@@ -38,7 +39,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((k) => k.startsWith('fittrack-') && k !== CACHE).map((k) => caches.delete(k))
+        keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE).map((k) => caches.delete(k))
       ))
       .then(() => self.clients.claim())
   );
@@ -52,7 +53,7 @@ self.addEventListener('fetch', (event) => {
 
   // Never cache Supabase traffic — auth and sync must always hit the network,
   // and a cached 401 would be a nightmare to debug.
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
 
   const isShell = req.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
 
@@ -60,17 +61,18 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
+          if (!res.ok) throw new Error('Shell unavailable');
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
+        .catch(() => caches.open(CACHE).then(async c => (await c.match(req)) || (await c.match('./index.html')) || Response.error()))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+    caches.open(CACHE).then(c => c.match(req)).then((hit) => hit || fetch(req).then((res) => {
       if (res && res.ok) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});

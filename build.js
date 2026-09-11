@@ -48,7 +48,7 @@ function vendor() {
 
 const PWA_HEAD = `
   <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="theme-color" content="#0a0b12">
+  <meta name="theme-color" content="#111722">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -61,14 +61,27 @@ const SW_REGISTER = `
     if ('serviceWorker' in navigator) {
       addEventListener('load', function () {
         navigator.serviceWorker.register('./sw.js').then(function (reg) {
+          const announceUpdate = () => {
+            window.FT_UPDATE_READY = true;
+            window.dispatchEvent(new Event('ft-update-ready'));
+          };
+          let hadController = !!navigator.serviceWorker.controller;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (hadController) announceUpdate();
+            hadController = true;
+          });
+          if (reg.waiting) announceUpdate();
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          });
+          window.addEventListener('online', () => reg.update().catch(() => {}));
           // A new build is live. Take over as soon as the old one lets go.
           reg.addEventListener('updatefound', function () {
             var w = reg.installing;
             if (!w) return;
             w.addEventListener('statechange', function () {
               if (w.state === 'installed' && navigator.serviceWorker.controller) {
-                window.FT_UPDATE_READY = true;
-                window.dispatchEvent(new Event('ft-update-ready'));
+                announceUpdate();
               }
             });
           });
@@ -78,7 +91,8 @@ const SW_REGISTER = `
   </script>`;
 
 function build(isDev) {
-  const OUT = path.join(ROOT, isDev ? 'dist-web-dev' : 'dist-web');
+  const desktop = process.argv.includes('--desktop');
+  const OUT = path.join(ROOT, desktop ? (isDev ? 'dist-desktop-web-dev' : 'dist-desktop-web') : (isDev ? 'dist-web-dev' : 'dist-web'));
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
 
@@ -111,12 +125,18 @@ function build(isDev) {
   const buildId = [
     require('./package.json').version,
     isDev ? 'dev' : 'live',
-    Math.floor(fs.statSync(path.join(ROOT, 'index.html')).mtimeMs).toString(36),
+    require('crypto').createHash('sha256').update(
+      ['index.html','food-model.js','theme.css','sync.js','config.js','public/sw.js','public/manifest.webmanifest'].map(f => fs.readFileSync(path.join(ROOT,f))).join('\n')
+    ).digest('hex').slice(0,12),
   ].join('-');
+
+  // An old phone service worker may still control the first navigation after
+  // deployment. Versioned app assets prevent it mixing new HTML with old logic.
+  if (!desktop) html = html.replace(/((?:src|href)="\.\/(?:config\.js|sync\.js|food-model\.js|theme\.css))"/g, '$1?build=' + buildId + '"');
 
   html = html.replace('</head>',
     '<script>window.FT_BUILD=' + JSON.stringify(buildId) + ';</script>\n' + PWA_HEAD + '\n</head>');
-  html = html.replace('</body>', SW_REGISTER + '\n</body>');
+  if (!desktop) html = html.replace('</body>', SW_REGISTER + '\n</body>');
 
   fs.writeFileSync(path.join(OUT, 'index.html'), html);
 
@@ -125,7 +145,7 @@ function build(isDev) {
     if (to.endsWith('babel.min.js')) continue; // precompiled; not shipped
     copy(path.join(ROOT, to), path.join(OUT, to));
   }
-  for (const f of ['config.js', 'sync.js']) copy(path.join(ROOT, f), path.join(OUT, f));
+  for (const f of ['config.js', 'sync.js', 'food-model.js', 'theme.css']) copy(path.join(ROOT, f), path.join(OUT, f));
   fs.cpSync(path.join(ROOT, 'public'), OUT, { recursive: true });
 
   // ── Cache busting ────────────────────────────────────────────────────────

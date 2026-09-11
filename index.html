@@ -9,6 +9,7 @@
   <script src="./lib/supabase.min.js"></script>
   <script src="./config.js"></script>
   <script src="./sync.js"></script>
+  <script src="./food-model.js"></script>
   <script src="./lib/babel.min.js"></script>
   <style>
     :root {
@@ -403,6 +404,7 @@
     .env-banner + .app { height:auto; flex:1; min-height:0; }
     body.is-dev { --accent:#8b5cf6; }
   </style>
+  <link rel="stylesheet" href="./theme.css">
 </head>
 <body>
   <div id="loading">
@@ -412,7 +414,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-  const { useState, useEffect, useRef } = React;
+  const { useState, useEffect, useRef, useMemo } = React;
 
   /* Which build this is. `FT_BUILD` is stamped in at build time and looks like
    * "1.1.0-live-mssj4308": version, environment, and a base-36 stamp of the
@@ -490,131 +492,6 @@
     { id:19, name:'Banana',                     calories:105, protein:1,  carbs:27, fat:0,  fiber:3, grams:118, servingQty:118, servingUnit:'g', servingSize:'118g' },
     { id:20, name:'Oatmeal (plain, cooked)',    calories:166, protein:6,  carbs:32, fat:4,  fiber:4, grams:234, servingQty:234, servingUnit:'g', servingSize:'234g' },
   ];
-
-  // ── UNIT HELPERS ─────────────────────────────────────────────────────────────
-  const UNITS = ['g','oz','lb','slice','piece','cup','tbsp','tsp','serving'];
-  const GRAM_CONV = {g:1, oz:28.3495, lb:453.592};
-  const toGrams = (qty,unit) => GRAM_CONV[unit] ? qty*GRAM_CONV[unit] : null;
-
-  /* Volume is its own family. Converting a cup to grams needs the food's
-   * density, which nothing here knows, so cups convert to spoons and no
-   * further — which is still most of what a kitchen actually needs. */
-  const ML_CONV = {cup:236.588, tbsp:14.7868, tsp:4.92892};
-  const toMl = (qty,unit) => ML_CONV[unit] ? qty*ML_CONV[unit] : null;
-
-  /* Units that measure the same kind of thing, so a dropdown can offer only
-   * the ones a given amount can actually be converted into. */
-  const unitFamily = unit => GRAM_CONV[unit] ? Object.keys(GRAM_CONV)
-                           : ML_CONV[unit]   ? Object.keys(ML_CONV)
-                           : [unit];
-
-  /* How many times bigger `to` is than `from`. Mass converts within mass and
-   * volume within volume; identical units divide directly, which covers counted
-   * things like slices. Anything else (g -> slice) has no defined conversion
-   * and returns null, so callers can re-baseline or refuse rather than quietly
-   * leaving the macros wrong. */
-  const ratioBetween = (fromQty, fromUnit, toQty, toUnit) => {
-    const from = parseFloat(fromQty), to = parseFloat(toQty);
-    if (!(from > 0) || !(to >= 0)) return null;
-    const fg = toGrams(from, fromUnit), tg = toGrams(to, toUnit);
-    if (fg !== null && tg !== null && fg > 0) return tg / fg;
-    const fm = toMl(from, fromUnit), tm = toMl(to, toUnit);
-    if (fm !== null && tm !== null && fm > 0) return tm / fm;
-    if (fromUnit === toUnit) return to / from;
-    return null;
-  };
-
-  /* Where a food's stored macros come from, in order of how much the evidence
-   * is worth: the entry's own structured amount, then a free-text serving, then
-   * the last time it was actually logged. Null means nothing was ever recorded
-   * and there is nothing to convert against. */
-  const foodBasis = (food, days) => {
-    if (!food) return null;
-    if (food.servingQty) return { qty:String(food.servingQty), unit:food.servingUnit||'g', from:'entry' };
-    if (food.servingSize) { const p = parseQtyUnit(food.servingSize); return { ...p, from:'entry' }; }
-    const recent = lastLoggedServing(days, food.name);
-    return recent ? { ...parseQtyUnit(recent.servingSize), from:'log', date:recent.date } : null;
-  };
-
-  /* Re-price every meal already logged from a food whose definition changed.
-   *
-   * Correcting a food's macros should correct the history that came from it —
-   * otherwise the numbers you fixed stay wrong everywhere they were used. Each
-   * meal is rescaled to the amount it was actually logged at, so a 25g entry
-   * and a 175g entry both end up right rather than both taking the new values
-   * verbatim. Meals whose amount cannot be converted to the food's new basis
-   * are left untouched: guessing would corrupt them. */
-  const restateLoggedMeals = (days, prevFood, nextFood) => {
-    const key = (prevFood?.name || nextFood?.name || '').trim().toLowerCase();
-    if (!key) return days;
-    const basis = foodBasis(nextFood, days);
-    let touched = false;
-
-    const next = {};
-    Object.entries(days || {}).forEach(([date, day]) => {
-      let changed = false;
-      const meals = (day.meals || []).map(meal => {
-        if ((meal.name || '').trim().toLowerCase() !== key) return meal;
-
-        const amt = meal.servingSize ? parseQtyUnit(meal.servingSize) : null;
-        // No amount recorded means the meal took the food's macros as-is, so
-        // it should keep doing that.
-        const ratio = amt ? (basis ? ratioBetween(basis.qty, basis.unit, amt.qty, amt.unit) : null) : 1;
-        if (ratio == null) return meal;
-
-        const sc = v => Math.round((v || 0) * ratio * 10) / 10;
-        const updated = { ...meal,
-          name: nextFood.name || meal.name,
-          calories: Math.round((nextFood.calories || 0) * ratio),
-          protein: sc(nextFood.protein), carbs: sc(nextFood.carbs),
-          fat: sc(nextFood.fat), fiber: sc(nextFood.fiber || 0) };
-
-        if (JSON.stringify(updated) === JSON.stringify(meal)) return meal;
-        changed = true;
-        return updated;
-      });
-      next[date] = changed ? { ...day, meals, updatedAt: Date.now() } : day;
-      if (changed) touched = true;
-    });
-
-    return touched ? next : days;
-  };
-
-  /* The most recent time a food was actually logged, used to recover what a
-   * library entry's macros describe when the entry itself never recorded it.
-   * A log is the better witness anyway: it is what the numbers were used for. */
-  const lastLoggedServing = (days, name) => {
-    const key = (name||'').trim().toLowerCase();
-    if (!key) return null;
-    let best = null;
-    Object.values(days||{}).forEach(day => {
-      (day.meals||[]).forEach(meal => {
-        if ((meal.name||'').trim().toLowerCase() !== key || !meal.servingSize) return;
-        const when = meal.addedAt || day.date || '';
-        if (!best || String(when) > String(best.when)) best = { when, date:day.date, servingSize:meal.servingSize };
-      });
-    });
-    return best;
-  };
-
-  /* The amount a set of macros describes. Scaling always happens relative to
-   * one of these, so it works for a library food, a hand-typed food, and a meal
-   * edited weeks later alike. */
-  const basisFrom = (src, qty, unit) => src == null ? null : ({
-    qty: parseFloat(qty) || 1,
-    unit,
-    calories: parseFloat(src.calories) || 0,
-    protein:  parseFloat(src.protein)  || 0,
-    carbs:    parseFloat(src.carbs)    || 0,
-    fat:      parseFloat(src.fat)      || 0,
-    fiber:    parseFloat(src.fiber)    || 0,
-  });
-  const parseQtyUnit = s => {
-    if (!s) return {qty:'1',unit:'g'};
-    const m = String(s).trim().match(/^([0-9.]+)\s*(.+)?$/);
-    if (m) { const u=(m[2]||'').trim().toLowerCase(); return {qty:m[1], unit:UNITS.includes(u)?u:'g'}; }
-    return {qty:'1',unit:'g'};
-  };
 
   /* Dismissing on a backdrop click must mean a press that *started* on the
    * backdrop. Selecting text in a field and releasing the mouse past the
@@ -764,258 +641,94 @@
   }
 
   // ── ADD FOOD MODAL ───────────────────────────────────────────────────────────
-  function AddFoodModal({ foodLibrary, days, onSave, onAddToLibrary, onRemoveFromLibrary, onClose, initialMeal }) {
-    const isEditing = !!initialMeal;
-    const inLib = nm => foodLibrary.some(f => (f.name||'').trim().toLowerCase() === (nm||'').trim().toLowerCase());
-    const qs = initialMeal?.servingSize ? parseQtyUnit(initialMeal.servingSize) : {qty:'1', unit:'g'};
-    const [search,   setSearch]   = useState('');
-    const [baseFood, setBaseFood] = useState(null);
-    const [form, setForm] = useState({
-      name:     initialMeal?.name     || '',
-      mealType: initialMeal?.mealType || 'Breakfast',
-      calories: initialMeal?.calories != null ? String(initialMeal.calories) : '',
-      protein:  initialMeal?.protein  != null ? String(initialMeal.protein)  : '',
-      carbs:    initialMeal?.carbs    != null ? String(initialMeal.carbs)    : '',
-      fat:      initialMeal?.fat      != null ? String(initialMeal.fat)      : '',
-      fiber:    initialMeal?.fiber    != null ? String(initialMeal.fiber)    : '',
-      qty:  qs.qty,
-      unit: qs.unit,
-    });
-    const [saveToLib, setSaveToLib] = useState(isEditing ? inLib(initialMeal?.name) : true);
-    const searchRef = useRef(null);
-    useEffect(() => { if(searchRef.current) searchRef.current.focus(); }, []);
-
-    /* A meal's macros always describe its own serving size, so an existing meal
-     * is its own basis — that is what makes editing one rescale properly. */
-    const [basis, setBasis] = useState(() =>
-      initialMeal && initialMeal.calories != null ? basisFrom(initialMeal, qs.qty, qs.unit) : null);
-
-    const round1 = v => Math.round(v * 10) / 10;
-
-    /* Scaling runs from the change handlers rather than an effect: an effect
-     * watching the macro fields would fight the user as they typed. */
-    const applyAmount = (qtyStr, unit) => {
-      const q = parseFloat(qtyStr);
-      const r = basis && q ? ratioBetween(basis.qty, basis.unit, q, unit) : null;
-      if (r === null) { setForm(f => ({ ...f, qty:qtyStr, unit })); return; }
-      setForm(f => ({
-        ...f, qty:qtyStr, unit,
-        calories: String(Math.round(basis.calories * r)),
-        protein:  String(round1(basis.protein * r)),
-        carbs:    String(round1(basis.carbs   * r)),
-        fat:      String(round1(basis.fat     * r)),
-        fiber:    String(round1(basis.fiber   * r)),
-      }));
-    };
-
-    const changeQty = v => applyAmount(v.replace(/[^0-9.]/g,''), form.unit);
-
-    const changeUnit = u => {
-      const q = parseFloat(form.qty) || 1;
-      /* Some unit changes have no conversion — 85 g is not 85 slices, and
-       * carrying the number across would be nonsense. Treat the macros on
-       * screen as describing one of the new unit, so the amount becomes "1
-       * slice" and scaling continues correctly from there. */
-      if (basis && ratioBetween(basis.qty, basis.unit, q, u) === null) {
-        setBasis(basisFrom(form, 1, u));
-        setForm(f => ({ ...f, qty:'1', unit:u }));
-        return;
-      }
-      applyAmount(form.qty, u);
-    };
-
-    const results = search.trim().length > 0
-      ? foodLibrary.filter(f => f.name.toLowerCase().includes(search.toLowerCase())).slice(0,6)
-      : [];
-
-    const prefill = food => {
-      const fb = foodBasis(food, days);
-      const sq = fb ? fb.qty : 1;
-      const su = fb ? fb.unit : 'serving';
-      setForm(f => ({ ...f, name:food.name, calories:String(food.calories), protein:String(food.protein),
-        carbs:String(food.carbs), fat:String(food.fat), fiber:String(food.fiber||0),
-        qty:String(sq), unit:su }));
-      setBaseFood(fb ? {...food, servingQty:sq, servingUnit:su} : null);
-      setBasis(fb ? basisFrom(food, sq, su) : null);
-      setSearch('');
-    };
-
-    const quickAdd = food => {
-      const inputQty = parseFloat(form.qty)||1;
-      const fb = foodBasis(food, days);
-      const ratio = fb ? (ratioBetween(fb.qty, fb.unit, inputQty, form.unit) ?? 1) : 1;
-      const sc = v => Math.round((v||0) * ratio * 10) / 10;
-      onSave({ id:Date.now(), name:food.name, mealType:form.mealType,
-        calories:sc(food.calories), protein:sc(food.protein), carbs:sc(food.carbs),
-        fat:sc(food.fat), fiber:sc(food.fiber||0),
-        servingSize:`${inputQty} ${form.unit}`, addedAt:new Date().toISOString() });
-    };
-
-    const s = k => e => setForm(f=>({...f,[k]:e.target.value}));
-
-    /* Correcting a macro by hand asserts "at this amount, these are the real
-     * numbers", so it replaces the basis — otherwise the next amount change
-     * would scale from the old value and throw the correction away.
-     *
-     * This only ever *updates* a basis, never creates one: while a new food is
-     * still being typed there is no established amount to scale from, and
-     * inventing one would rescale the macros on every keystroke in the amount
-     * field. Such a food becomes scalable once it is saved, since the logged
-     * meal then carries the serving size its macros describe. */
-    const n = k => e => {
-      const next = { ...form, [k]: e.target.value.replace(/[^0-9.]/g,'') };
-      setForm(next);
-      if (basis) setBasis(basisFrom(next, next.qty, next.unit));
-    };
-    const valid = form.name.trim() && form.calories !== '';
-
-    const doSave = () => {
-      if (!valid) return;
-      const nm  = form.name.trim();
-      const qty = parseFloat(form.qty)||1;
-      const meal = {
-        id:Date.now(), name:nm, mealType:form.mealType,
-        calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
-        carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
-        fiber:parseFloat(form.fiber)||0,
-        servingSize:`${qty} ${form.unit}`,
-        addedAt:new Date().toISOString(),
-      };
-      if (saveToLib && !baseFood) {
-        const gramsVal = toGrams(qty, form.unit);
-        onAddToLibrary({
-          name:nm, id:Date.now()+1,
-          calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
-          carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
-          fiber:parseFloat(form.fiber)||0,
-          servingQty:qty, servingUnit:form.unit,
-          grams:gramsVal,
-          servingSize:`${qty} ${form.unit}`,
-        });
-      } else if (!saveToLib && inLib(nm) && onRemoveFromLibrary) {
-        onRemoveFromLibrary(nm);
-      }
-      onSave(meal);
-    };
-
-    return (
-      <div {...overlayProps(onClose)}>
-        <div className="modal">
-          <div className="modal-title">{isEditing ? 'Edit Food' : 'Log Food'}</div>
-
-          <div className="field">
-            <div className="field-lbl">Meal</div>
-            <div className="meal-type-grid">
-              {MEAL_TYPES.map(t => {
-                const col = M_COLOR[t];
-                return (
-                  <button key={t} className={`mt-btn ${form.mealType===t?'sel':''}`}
-                    onClick={() => setForm(f=>({...f,mealType:t}))}>
-                    <div className="mt-dot" style={{background: form.mealType===t ? col : 'var(--border2)'}}/>
-                    {t}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {!isEditing && <>
-            <div className="field">
-              <div className="field-lbl">Search Saved Foods</div>
-              <div className="lib-search-wrap">
-                <span className="lib-search-icon"><IcoSearch size={14}/></span>
-                <input ref={searchRef} className="input lib-search" placeholder="Search your food database…"
-                  value={search} onChange={e => setSearch(e.target.value)} />
-              </div>
-              {results.length > 0 && (
-                <div className="lib-results">
-                  {results.map(food => (
-                    <div key={food.id} className="lib-result">
-                      <div onClick={() => prefill(food)} style={{flex:1,minWidth:0}}>
-                        <div style={{display:'flex',alignItems:'center',gap:6}}>
-                          <div className="lib-result-name">{food.name}</div>
-                          {food.grams && <span style={{fontSize:9,fontWeight:800,color:'var(--fiber)',background:'rgba(52,211,153,0.13)',padding:'1px 6px',borderRadius:999,letterSpacing:'0.03em'}}>per g</span>}
-                        </div>
-                        <div className="lib-result-macros">P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g{food.grams?` · base ${food.grams}g`:''}{food.servingSize?' · '+food.servingSize:''}</div>
-                      </div>
-                      <div className="lib-result-cal">{food.calories}</div>
-                      <button className="lib-result-add" onClick={() => quickAdd(food)}>Add</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {search.trim().length > 0 && results.length === 0 && (
-                <div style={{fontSize:11,color:'var(--muted)',padding:'8px 0'}}>No matches — fill in the form below.</div>
-              )}
-            </div>
-            <div className="divider"><div className="divider-lbl"><span>Or Enter Manually</span></div></div>
-          </>}
-
-          <div className="field">
-            <div className="field-lbl">Food Name</div>
-            <input className="input" placeholder="e.g. Chicken Breast" value={form.name} onChange={s('name')}
-              ref={isEditing ? searchRef : null}/>
-          </div>
-
-          <div className="field">
-            {basis ? (
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:7}}>
-                <div className="field-lbl" style={{marginBottom:0}}>Amount</div>
-                <div style={{fontSize:9,color:'var(--fiber)',fontWeight:700}}>
-                  {`scales from ${+basis.qty} ${basis.unit}`}
-                </div>
-              </div>
-            ) : <div className="field-lbl">Amount</div>}
-            <div style={{display:'flex',gap:10}}>
-              <input className="input" type="number" inputMode="decimal" placeholder="1"
-                value={form.qty} onChange={e => changeQty(e.target.value)} style={{flex:'2 1 0'}}/>
-              <select className="unit-select" value={form.unit}
-                onChange={e => changeUnit(e.target.value)}>
-                <option value="g">g</option>
-                <option value="oz">oz</option>
-                <option value="lb">lb</option>
-                <option value="slice">slice</option>
-                <option value="piece">piece</option>
-                <option value="cup">cup</option>
-                <option value="tbsp">tbsp</option>
-                <option value="tsp">tsp</option>
-                <option value="serving">serving</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="field">
-            <div className="field-lbl">Calories</div>
-            <input className="input" type="number" inputMode="decimal" placeholder="0" value={form.calories} onChange={n('calories')}/>
-          </div>
-
-          <div className="row4">
-            <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.protein} onChange={n('protein')}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--carb)'}}>Carbs g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.carbs} onChange={n('carbs')}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--fat)'}}>Fat g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.fat} onChange={n('fat')}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--fiber)'}}>Fiber g</div><input className="input" type="number" inputMode="decimal" placeholder="0" value={form.fiber} onChange={n('fiber')}/></div>
-          </div>
-
-          {!isEditing && (
-            <div className="save-toggle" onClick={() => setSaveToLib(v=>!v)}>
-              <div className={`save-toggle-box ${saveToLib?'checked':''}`}>{saveToLib && <IcoCheck size={11}/>}</div>
-              <div>
-                <div className="save-toggle-label">Save to My Foods database</div>
-                <div style={{fontSize:11,color:'var(--muted)',fontWeight:500,marginTop:2}}>
-                  {saveToLib ? 'Saves so you can find and scale it later' : 'One-time log — not added to your database'}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" disabled={!valid} onClick={doSave}>{isEditing ? 'Save Changes' : 'Add Food'}</button>
-          </div>
-        </div>
-      </div>
-    );
+  function NutritionFields({ values, onChange, readOnly = false }) {
+    return <div className="nutrition-fields">{FTFood.nutrients.map(key => <label className="field" key={key}>
+      <span className="field-lbl">{key === 'calories' ? 'Calories (kcal)' : `${key[0].toUpperCase()+key.slice(1)} (g)`}</span>
+      <input className="input" type="number" min="0" step="any" value={values[key] ?? ''} readOnly={readOnly}
+        onChange={e => onChange(key, e.target.value)}/>
+    </label>)}</div>;
   }
+
+  function AddFoodModal({ foodLibrary, days, onSave, onAddToLibrary, onClose, initialMeal, initialFood, initialType, dateLabel }) {
+    const isEditing = !!initialMeal;
+    const originalFood = initialFood || foodLibrary.find(f => initialMeal?.foodId != null && String(f.id) === String(initialMeal.foodId));
+    const [selectedId, setSelectedId] = useState(originalFood?.id ?? null);
+    const selected = foodLibrary.find(f => selectedId != null && String(f.id) === String(selectedId));
+    const recentAmount = initialFood && FTFood.mealAmount(FTFood.recentFoods(days, foodLibrary).find(r=>r.food.id===initialFood.id)?.meal || {});
+    const initialAmount = FTFood.mealAmount(initialMeal || {}) || (recentAmount && FTFood.ratio(initialFood,recentAmount.qty,recentAmount.unit)!=null ? recentAmount : null) || FTFood.basis(initialFood) || {qty:1, unit:'serving'};
+    const [qty, setQty] = useState(String(initialAmount.qty));
+    const [unit, setUnit] = useState(initialAmount.unit);
+    const [mealType, setMealType] = useState(initialMeal?.mealType || initialType || (new Date().getHours()<11?'Breakfast':new Date().getHours()<16?'Lunch':'Dinner'));
+    const [search, setSearch] = useState('');
+    const [choosing, setChoosing] = useState(!initialMeal && !initialFood);
+    const [manual, setManual] = useState(isEditing && !originalFood);
+    const [saveToLib, setSaveToLib] = useState(!isEditing);
+    const [form, setForm] = useState(initialMeal || {name:'',calories:'',protein:'',carbs:'',fat:'',fiber:''});
+    const [error, setError] = useState('');
+    const [manualBasis, setManualBasis] = useState(initialMeal ? {...initialMeal, servingQty:initialAmount.qty, servingUnit:initialAmount.unit} : null);
+    const recent = useMemo(() => FTFood.recentFoods(days, foodLibrary), [days, foodLibrary]);
+    const active = foodLibrary.filter(f => !f.archived);
+    const results = search.trim() ? active.filter(f => FTFood.nameKey(f.name).includes(FTFood.nameKey(search))).slice(0,20)
+      : [...recent.map(r=>r.food), ...active.filter(f=>!recent.some(r=>r.food.id===f.id))].slice(0,8);
+    const choose = food => {
+      const last = recent.find(r=>r.food.id===food.id)?.meal;
+      const amount = (isEditing && FTFood.mealAmount(initialMeal)) || (last && FTFood.mealAmount(last));
+      const start = amount && FTFood.ratio(food,amount.qty,amount.unit)!=null ? amount : FTFood.basis(food) || {qty:1,unit:'serving'};
+      setSelectedId(food.id); setQty(String(start.qty)); setUnit(start.unit); setManual(false); setChoosing(false); setError('');
+    };
+    const changeUnit = next => {
+      const source = selected || manualBasis;
+      if (source) {
+        const converted = FTFood.convert(source, qty, unit, next);
+        if (converted == null) {setError('Define this unit in the food database before using it.');return;}
+        setQty(String(Number(converted.toFixed(8))));
+      }
+      setUnit(next);setError('');
+    };
+    const source = selected || manualBasis;
+    const multiple = source ? FTFood.ratio(source, qty, unit) : null;
+    const nutrition = source && multiple != null ? FTFood.scale(source,multiple) : form;
+    const options = source ? [...new Set([...FTFood.availableUnits(source), unit])] : FTFood.units;
+    const updateMacro = (key, value) => {
+      const next = {...nutrition, name:form.name, [key]:value}; setForm(next);
+      if (manualBasis) setManualBasis({...next,servingQty:Number(qty),servingUnit:unit});
+    };
+    const handleSave = () => {
+      if (!FTFood.positive(qty)) {setError('Enter an amount greater than zero.');return;}
+      if (selected) {
+        if (multiple == null) {setError('This amount cannot be converted. Choose a supported unit.');return;}
+        onSave(FTFood.createMeal(selected,qty,unit,mealType,initialMeal)); return;
+      }
+      const food = {id:FTFood.id(), name:form.name?.trim(), ...Object.fromEntries(FTFood.nutrients.map(k=>[k, nutrition[k] === '' && k !== 'calories' ? 0 : nutrition[k]])), servingQty:Number(qty),servingUnit:unit,servingSize:`${qty} ${unit}`,portions:[]};
+      const problem = FTFood.validate(food, saveToLib && !isEditing ? foodLibrary : []);
+      if (problem) {setError(problem);return;}
+      const log = FTFood.createMeal(food,qty,unit,mealType,initialMeal);
+      if (saveToLib && !isEditing) onAddToLibrary({...food,...FTFood.scale(food,1),updatedAt:Date.now()});
+      else {delete log.foodId;log.standalone=true;}
+      onSave(log);
+    };
+    return <div {...overlayProps(onClose)}><div className="modal food-log-modal">
+      <div className="modal-title">{isEditing?'Edit food log':'Log food'}<div className="helper">{dateLabel || 'Selected day'}</div></div>
+      <div className="meal-type-grid">{MEAL_TYPES.map(t=><button key={t} className={`mt-btn ${mealType===t?'sel':''}`} onClick={()=>setMealType(t)}>{t}</button>)}</div>
+      {(selected || manual || isEditing) && <button className="btn btn-ghost btn-sm" style={{marginTop:14}} onClick={()=>setChoosing(v=>!v)}>{choosing?'Hide food search':selected?'Change linked food':'Link to a saved food'}</button>}
+      {choosing && <><label className="field" style={{display:'block',marginTop:18}}><span className="field-lbl">Find a saved food</span><input autoFocus className="input" placeholder="Search your food database…" value={search} onChange={e=>setSearch(e.target.value)}/></label>
+        <div className="field-lbl">{search?'Search results':'Recent & saved foods'}</div>
+        <div className="food-results">{results.map(food=><button className={`food-choice ${selectedId===food.id?'chosen':''}`} key={food.id} onClick={()=>choose(food)}><span>{food.name}<small>{food.servingSize || 'Serving not specified'}</small></span><span>{food.calories} kcal</span></button>)}{!results.length&&<p className="helper">No matches. Add a new food below.</p>}</div>
+        <button className="btn btn-ghost btn-sm" style={{margin:'12px 0'}} onClick={()=>{setManual(true);setChoosing(false);setSelectedId(null);setManualBasis(null);setQty('1');setUnit('serving');setForm({name:search,calories:'',protein:'',carbs:'',fat:'',fiber:''});setError('');}}>+ Enter a new food</button></>}
+      {(selected || manual) && <>
+        {selected ? <div className="food-selected"><strong>{selected.name}</strong><p className="helper">Linked to your database. Nutrition corrections update this log automatically.</p>{selected.archived&&<p className="helper">Archived food · existing logs remain editable.</p>}</div>
+          : <label className="field" style={{display:'block'}}><span className="field-lbl">Food name</span><input className="input" value={form.name||''} onChange={e=>setForm(f=>({...f,name:e.target.value}))}/></label>}
+        <div className="row2" style={{marginTop:16}}><label className="field"><span className="field-lbl">Amount eaten</span><input className="input" type="number" min="0.000001" step="any" value={qty} onChange={e=>setQty(e.target.value)}/></label><label className="field"><span className="field-lbl">Unit</span><select className="input" aria-label="Unit" value={unit} onChange={e=>changeUnit(e.target.value)}>{options.map(u=><option key={u}>{u}</option>)}</select></label></div>
+        <p className="helper">{source ? 'Changing units preserves the amount eaten. Change the quantity to adjust your portion.' : 'Enter the nutrition for exactly this amount.'}</p>
+        <NutritionFields values={nutrition} onChange={updateMacro} readOnly={!!selected}/>
+        {selected && <p className="helper">Need slices, scoops, or cups? Add an equivalent in Food database → Edit food.</p>}
+        {manual && !isEditing && <label className="check-label"><input type="checkbox" checked={saveToLib} onChange={e=>setSaveToLib(e.target.checked)}/> Save to food database for reuse</label>}
+      </>}
+      {error&&<p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!selected&&!manual} onClick={handleSave}>{isEditing?'Save changes':'Add to diary'}</button></div>
+    </div></div>;
+  }
+
 
   // ── WORKOUT MODAL ────────────────────────────────────────────────────────────
   function WorkoutModal({ onSave, onClose }) {
@@ -1242,232 +955,53 @@
     );
   }
 
-  function EditFoodModal({ food, days, onSave, onClose }) {
-    /* What this entry's macros actually describe. Older entries stored only a
-     * free-text serving, or nothing at all, which left "220 calories" meaning
-     * nothing in particular — so fall back to the last time the food was
-     * logged, which is the best surviving record of what the numbers were for. */
-    const known = foodBasis(food, days);
-    const recent = known && known.from === 'log' ? known : null;
-
-    const [form, setForm] = useState({
-      name:food.name, calories:food.calories, protein:food.protein,
-      carbs:food.carbs, fat:food.fat, fiber:food.fiber||0,
-      qty: known ? known.qty : '1',
-      unit: known ? known.unit : 'serving',
-    });
-    // Plenty of older entries recorded no serving at all, and no log of them
-    // did either. Saying "220 cal for 1 serving" there would be inventing a
-    // fact, so the amount is marked unknown until it is actually set.
-    const [amountSet, setAmountSet] = useState(!!known);
-    const set = (k, v) => setForm(f => ({...f, [k]: v}));
-    const setAmount = (k, v) => { setAmountSet(true); set(k, v); };
-    const valid = form.name.trim().length > 0 && Number(form.calories) >= 0;
-
-    const qtyNum = parseFloat(form.qty) || 1;
-    const amount = `${+qtyNum.toFixed(2)} ${form.unit}`;
-    const perGram = toGrams(qtyNum, form.unit);
-
-    const handleSave = () => {
-      if (!valid) return;
-      // Persist the amount in structured form, not just as a label, so logging
-      // this food later can scale from it.
-      onSave({ ...food, name:form.name.trim(),
-        calories:parseFloat(form.calories)||0, protein:parseFloat(form.protein)||0,
-        carbs:parseFloat(form.carbs)||0, fat:parseFloat(form.fat)||0,
-        fiber:parseFloat(form.fiber)||0,
-        servingQty:amountSet ? qtyNum : food.servingQty,
-        servingUnit:amountSet ? form.unit : food.servingUnit,
-        grams:amountSet ? toGrams(qtyNum, form.unit) : food.grams,
-        servingSize:amountSet ? amount : (food.servingSize||'') });
-      onClose();
+  function EditFoodModal({ food, days, library = [], onSave, onClose }) {
+    const known = FTFood.basis(food);
+    const [form,setForm] = useState({...food,servingQty:known?.qty || '',servingUnit:known?.unit || 'g',portions:food.portions || []});
+    const [error,setError] = useState('');
+    const candidate = {...form, servingSize:`${form.servingQty} ${form.servingUnit}`, grams:FTFood.mass[form.servingUnit] ? Number(form.servingQty)*FTFood.mass[form.servingUnit] : null};
+    const impact = FTFood.impact(days,candidate);
+    const set = (k,v) => setForm(f=>({...f,[k]:v}));
+    const saveFood = () => {
+      const problem = FTFood.validate(candidate,library);
+      if(problem){setError(problem);return;}
+      if(impact.blocked){setError('This change removes a conversion used by past logs. Keep an equivalent for those units before saving.');return;}
+      onSave({...candidate,name:candidate.name.trim(),servingQty:Number(candidate.servingQty),portions:candidate.portions.map(p=>({...p,qty:Number(p.qty)})),...FTFood.scale(candidate,1),updatedAt:Date.now()});onClose();
     };
-    return (
-      <div {...overlayProps(onClose)}>
-        <div className="modal">
-          <div className="modal-title">Edit Food</div>
-
-          <div style={{padding:'11px 13px',marginBottom:13,background:'var(--card2)',
-                       border:'1px solid var(--border)',borderLeft:'3px solid var(--accent)',
-                       borderRadius:'var(--rs)'}}>
-            <div style={{fontSize:13,fontWeight:700,letterSpacing:'-0.01em'}}>
-              <span style={{color:'var(--cal)'}}>{parseFloat(form.calories)||0} cal</span>
-              <span style={{color:'var(--muted)',fontWeight:600}}> for </span>
-              {amountSet
-                ? <span>{amount}</span>
-                : <span style={{color:'var(--fat)'}}>an amount that was never recorded</span>}
-            </div>
-            <div style={{fontSize:11,color:'var(--muted)',fontWeight:600,marginTop:3}}>
-              P {parseFloat(form.protein)||0}g · C {parseFloat(form.carbs)||0}g · F {parseFloat(form.fat)||0}g · Fi {parseFloat(form.fiber)||0}g
-              {amountSet && perGram > 0 && ` · ${Math.round(((parseFloat(form.calories)||0)/perGram)*100)/100} cal/g`}
-            </div>
-            {recent ? (
-              <div style={{fontSize:10,color:'var(--fiber)',fontWeight:700,marginTop:5}}>
-                Amount recovered from your last log of this food{recent.date ? ` on ${recent.date}` : ''} — confirm it below
-              </div>
-            ) : !amountSet && (
-              <div style={{fontSize:10,color:'var(--fat)',fontWeight:700,marginTop:5}}>
-                Set it below so logging this food can scale correctly
-              </div>
-            )}
-          </div>
-
-          <div className="field">
-            <div className="field-lbl">Name</div>
-            <input className="input" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Food name"/>
-          </div>
-          <div className="row2">
-            <div className="field"><div className="field-lbl">Calories</div><input className="input" type="number" min="0" value={form.calories} onChange={e=>set('calories',e.target.value)}/></div>
-            <div className="field">
-              <div className="field-lbl">These macros are for</div>
-              <div style={{display:'flex',gap:8}}>
-                <input className="input" type="number" inputMode="decimal" min="0" style={{flex:'1 1 0',minWidth:0}}
-                  value={form.qty} onChange={e=>setAmount('qty',e.target.value.replace(/[^0-9.]/g,''))}/>
-                <select className="unit-select" value={form.unit} onChange={e=>setAmount('unit',e.target.value)}>
-                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-          <div className="row4">
-            <div className="field"><div className="field-lbl" style={{color:'var(--prot)'}}>Protein g</div><input className="input" type="number" min="0" value={form.protein} onChange={e=>set('protein',e.target.value)}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--carb)'}}>Carbs g</div><input className="input" type="number" min="0" value={form.carbs} onChange={e=>set('carbs',e.target.value)}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--fat)'}}>Fat g</div><input className="input" type="number" min="0" value={form.fat} onChange={e=>set('fat',e.target.value)}/></div>
-            <div className="field"><div className="field-lbl" style={{color:'var(--fiber)'}}>Fiber g</div><input className="input" type="number" min="0" value={form.fiber} onChange={e=>set('fiber',e.target.value)}/></div>
-          </div>
-          <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave} disabled={!valid}>Save Changes</button>
-          </div>
-        </div>
+    return <div {...overlayProps(onClose)}><div className="modal">
+      <div className="modal-title">{food.name?'Edit food':'New food'}</div>
+      <label className="field" style={{display:'block'}}><span className="field-lbl">Name</span><input className="input" value={form.name} onChange={e=>set('name',e.target.value)}/></label>
+      <div className="food-selected"><strong>Nutrition label</strong><p className="helper">All nutrition below describes this entire amount. Changing it redefines the serving; it does not rescale the values you enter.</p>
+        <div className="row2" style={{marginTop:12}}><label className="field"><span className="field-lbl">Label amount</span><input className="input" type="number" min="0.000001" step="any" value={form.servingQty} onChange={e=>set('servingQty',e.target.value)}/></label><label className="field"><span className="field-lbl">Label unit</span><select className="input" aria-label="Label unit" value={form.servingUnit} onChange={e=>set('servingUnit',e.target.value)}>{FTFood.units.map(u=><option key={u}>{u}</option>)}</select></label></div>
+        <NutritionFields values={form} onChange={set}/>
       </div>
-    );
+      <div className="section-heading"><strong>Equivalent portions</strong><button className="btn btn-ghost btn-sm" onClick={()=>set('portions',[...form.portions,{qty:'',unit:'piece'}])}>+ Add equivalent</button></div>
+      <p className="helper">{form.servingQty || '…'} {form.servingUnit} equals each portion below. For example: 30 g = 2 slices. Grams, ounces and pounds convert automatically; volume uses US measures.</p>
+      {form.portions.map((p,i)=><div className="portion-row" key={i}><input className="input" aria-label={`Equivalent ${i+1} amount`} type="number" min="0.000001" step="any" value={p.qty} onChange={e=>set('portions',form.portions.map((v,j)=>i===j?{...v,qty:e.target.value}:v))}/><select className="input" aria-label={`Equivalent ${i+1} unit`} value={p.unit} onChange={e=>set('portions',form.portions.map((v,j)=>i===j?{...v,unit:e.target.value}:v))}>{FTFood.units.filter(u=>u!=='serving').map(u=><option key={u}>{u}</option>)}</select><button className="btn btn-ghost btn-sm" aria-label={`Remove equivalent ${i+1}`} onClick={()=>set('portions',form.portions.filter((_,j)=>i!==j))}>Remove</button></div>)}
+      <div className="food-impact"><strong>{impact.entries ? `${impact.entries} linked log${impact.entries===1?'':'s'} across ${impact.days} day${impact.days===1?'':'s'}` : 'No linked logs yet'}</strong><p className="helper">Saving updates nutrition and names everywhere this food is linked. Recorded quantities and dates stay the same.</p>{impact.blocked>0&&<p className="form-error">{impact.blocked} log(s) need a conversion that this definition no longer provides.</p>}</div>
+      {error&&<p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={saveFood}>Save food</button></div>
+    </div></div>;
   }
 
-  function LogLibraryFoodModal({ food, days, onLog, onClose }) {
-    const [mealType, setMealType] = useState('Breakfast');
-
-    /* With a known amount behind the stored macros, the amount logged is a real
-     * measurement and converts within its family. Without one there is nothing
-     * to convert against, so it degrades to a plain multiplier — the old
-     * behaviour, but now labelled as such instead of pretending to be grams. */
-    const basis = foodBasis(food, days);
-    const [qty, setQty]   = useState(basis ? basis.qty : '1');
-    const [unit, setUnit] = useState(basis ? basis.unit : 'serving');
-
-    const q = Math.max(parseFloat(qty) || 0, 0);
-    const ratio = basis ? ratioBetween(basis.qty, basis.unit, q, unit) : q;
-    const sc = v => Math.round((v || 0) * (ratio == null ? 1 : ratio) * 10) / 10;
-    const options = basis ? unitFamily(basis.unit) : UNITS;
-
-    const handleLog = () => {
-      if (ratio == null) return;
-      onLog({ id: Date.now(), name: food.name, mealType,
-        calories: sc(food.calories), protein: sc(food.protein),
-        carbs: sc(food.carbs), fat: sc(food.fat), fiber: sc(food.fiber || 0),
-        // Record the amount actually eaten, so editing this meal later — and
-        // the food's own basis, if it never had one — can scale from it.
-        servingSize: `${+q.toFixed(2)} ${unit}`,
-        addedAt: new Date().toISOString() });
-      onClose();
-    };
-    return (
-      <div {...overlayProps(onClose)}>
-        <div className="modal">
-          <div className="modal-title">Log Food</div>
-          <div style={{marginBottom:14,padding:'13px 14px',background:'var(--card2)',borderRadius:'var(--rs)',border:'1px solid var(--border)'}}>
-            <div style={{fontWeight:800,fontSize:14,marginBottom:5}}>{food.name}</div>
-            <div style={{fontSize:11,color:'var(--muted)'}}>
-              {basis ? `Per ${+basis.qty} ${basis.unit}` : 'Per serving'}: {food.calories} cal · P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g
-            </div>
-            {basis && basis.from === 'log' && (
-              <div style={{fontSize:10,color:'var(--fiber)',fontWeight:700,marginTop:4}}>
-                Amount recovered from your last log{basis.date ? ` on ${basis.date}` : ''}
-              </div>
-            )}
-            {!basis && (
-              <div style={{fontSize:10,color:'var(--fat)',fontWeight:700,marginTop:4}}>
-                No amount recorded for this food — counting in whole servings. Set one in My Foods to log it by weight.
-              </div>
-            )}
-          </div>
-          <div className="field">
-            <div className="field-lbl">Meal</div>
-            <div className="meal-type-grid">
-              {MEAL_TYPES.map(t => (
-                <button key={t} className={`mt-btn ${mealType===t?'sel':''}`} onClick={() => setMealType(t)}>
-                  <div className="mt-dot" style={{background: mealType===t ? M_COLOR[t] : 'var(--border2)'}}/>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="row2">
-            <div className="field" style={{flex:1}}>
-              <div className="field-lbl">{basis ? 'Amount eaten' : 'Servings'}</div>
-              <div style={{display:'flex',gap:8}}>
-                <input className="input" type="number" min="0" step="any" style={{flex:'1 1 0',minWidth:0}}
-                  value={qty} onChange={e => setQty(e.target.value.replace(/[^0-9.]/g,''))}/>
-                <select className="unit-select" value={unit} onChange={e => setUnit(e.target.value)}>
-                  {options.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="field" style={{flex:1}}>
-              <div className="field-lbl">Total Calories</div>
-              <div style={{padding:'12px 13px',background:'var(--card2)',border:'1.5px solid var(--border)',borderRadius:'var(--rs)',fontSize:18,fontWeight:800,color:'var(--cal)',letterSpacing:'-0.02em'}}>{sc(food.calories)}</div>
-            </div>
-          </div>
-          <div style={{fontSize:11,color:'var(--muted)',marginBottom:10,padding:'9px 13px',background:'var(--card2)',borderRadius:'var(--rs)',border:'1px solid var(--border)'}}>
-            Totals: P {sc(food.protein)}g · C {sc(food.carbs)}g · F {sc(food.fat)}g · Fi {sc(food.fiber||0)}g
-          </div>
-          <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleLog} disabled={ratio == null}>Log to Today</button>
-          </div>
-        </div>
-      </div>
-    );
+  function FoodDatabase({ library, days, onDelete, onEdit, onLog, onAdd, dateLabel }) {
+    const [search,setSearch] = useState('');
+    const [archived,setArchived] = useState(false);
+    const [editing,setEditing] = useState(null);
+    const [logging,setLogging] = useState(null);
+    const filtered = library.filter(f=>!!f.archived===archived && FTFood.nameKey(f.name).includes(FTFood.nameKey(search))).sort((a,b)=>a.name.localeCompare(b.name));
+    const create = () => setEditing({id:FTFood.id(),name:'',calories:'',protein:0,carbs:0,fat:0,fiber:0,servingQty:100,servingUnit:'g',portions:[]});
+    return <><div className="section-heading"><div><h2>Food database</h2><p className="helper">One food record. Every portion. Consistent history.</p></div><button className="btn btn-primary" onClick={create}>+ New food</button></div>
+      <div className="database-toolbar"><input className="input" aria-label="Search food database" placeholder="Search foods…" value={search} onChange={e=>setSearch(e.target.value)}/><label className="check-label"><input type="checkbox" checked={archived} onChange={e=>setArchived(e.target.checked)}/> Archived</label></div>
+      <p className="helper" style={{marginBottom:16}}>{filtered.length} foods · Archiving hides a food from search and keeps past logs linked.</p>
+      <div className="card">{filtered.map(food=><div className="database-row" key={food.id}><div className="lib-food-info"><div className="lib-food-name">{food.name}</div><div className="helper">{food.calories} kcal · P {food.protein} g · C {food.carbs} g · F {food.fat} g · Fiber {food.fiber||0} g</div><div className="helper">Per {food.servingSize || 'unspecified serving'}{food.portions?.length ? ' · '+food.portions.map(p=>`${p.qty} ${p.unit}`).join(' = ') : ''}</div></div><div className="database-actions">{!archived&&<button className="btn btn-primary btn-sm" onClick={()=>setLogging(food)}>Log</button>}<button className="btn btn-ghost btn-sm" onClick={()=>setEditing(food)}>Edit</button><button className="btn btn-ghost btn-sm" onClick={()=>archived?onEdit({...food,archived:false,updatedAt:Date.now()}):onDelete(food.id)}>{archived?'Restore':'Archive'}</button></div></div>)}{!filtered.length&&<div className="empty-state"><div className="empty-state-title">{archived?'No archived foods':'No foods found'}</div><p className="helper">{archived?'Archived foods will appear here.':'Try a different search or add a new food.'}</p></div>}</div>
+      {editing&&<EditFoodModal food={editing} library={library} days={days} onSave={f=>library.some(x=>x.id===f.id)?onEdit(f):(onAdd||onEdit)(f)} onClose={()=>setEditing(null)}/>}
+      {logging&&<AddFoodModal foodLibrary={library} days={days} initialFood={logging} dateLabel={dateLabel || fmtFull(todayStr())} onAddToLibrary={onAdd||onEdit} onSave={m=>{onLog(m);setLogging(null);}} onClose={()=>setLogging(null)}/>}
+    </>;
   }
 
-  function FoodLibraryModal({ library, days, onDelete, onEdit, onLog, onClose }) {
-    const [search, setSearch] = useState('');
-    const [editingFood, setEditingFood] = useState(null);
-    const [loggingFood, setLoggingFood] = useState(null);
-    const filtered = search.trim() ? library.filter(f => f.name.toLowerCase().includes(search.toLowerCase())) : library;
-    return (
-      <div {...overlayProps(onClose)}>
-        <div className="modal">
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-            <div className="modal-title" style={{marginBottom:0}}>My Foods ({library.length})</div>
-            <button className="btn btn-ghost btn-sm" onClick={onClose}>Done</button>
-          </div>
-          <div className="lib-search-wrap" style={{marginBottom:12}}>
-            <span className="lib-search-icon"><IcoSearch size={14}/></span>
-            <input className="input lib-search" placeholder="Search…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          </div>
-          {filtered.length === 0
-            ? <div style={{padding:'28px 0',textAlign:'center',color:'var(--muted)',fontSize:13}}>No foods found</div>
-            : <div className="card">
-                {filtered.map(food => (
-                  <div key={food.id} className="lib-food-row">
-                    <div className="lib-food-info">
-                      <div className="lib-food-name">{food.name}</div>
-                      <div className="lib-food-macros">P {food.protein}g · C {food.carbs}g · F {food.fat}g · Fi {food.fiber||0}g{food.servingSize?' · '+food.servingSize:''}</div>
-                    </div>
-                    <div className="lib-food-cal">{food.calories}</div>
-                    <button className="icon-btn" style={{background:'rgba(52,211,153,0.1)',color:'var(--green)'}} onClick={() => setLoggingFood(food)} title="Log food"><IcoPlus size={13}/></button>
-                    <button className="icon-btn icon-btn-edit" onClick={() => setEditingFood(food)}><IcoEdit size={13}/></button>
-                    <button className="icon-btn icon-btn-del" onClick={() => onDelete(food.id)}><IcoX size={12}/></button>
-                  </div>
-                ))}
-              </div>
-          }
-        </div>
-        {editingFood  && <EditFoodModal food={editingFood} days={days} onSave={f=>{onEdit(f);setEditingFood(null);}} onClose={()=>setEditingFood(null)}/>}
-        {loggingFood  && <LogLibraryFoodModal food={loggingFood} days={days} onLog={f=>{onLog(f);setLoggingFood(null);}} onClose={()=>setLoggingFood(null)}/>}
-      </div>
-    );
+  function FoodLibraryModal({ onClose, ...props }) {
+    return <div {...overlayProps(onClose)}><div className="modal" style={{maxWidth:800}}><button className="btn btn-ghost btn-sm" onClick={onClose}>Close database</button><FoodDatabase {...props}/></div></div>;
   }
 
   // ── WEIGHT CHART ─────────────────────────────────────────────────────────────
@@ -1554,13 +1088,14 @@
 
   // ── MEAL ROW ─────────────────────────────────────────────────────────────────
   function MealRow({ meal, onDelete, onEdit }) {
-    const [confirming, setConfirming] = useState(false);
     return (
       <div className="meal-row">
         <MealBadge type={meal.mealType} size={40}/>
         <div className="meal-info">
           <div className="meal-name">{meal.name}</div>
           {meal.servingSize && <div className="meal-serving">{meal.servingSize}</div>}
+          <div className="helper">{meal.foodId != null ? 'Linked food' : meal.standalone ? 'One-time entry' : 'Unlinked entry · edit to link a saved food'}</div>
+          {meal.nutritionIssue && <p className="form-error">{meal.nutritionIssue}</p>}
           <div className="meal-pills">
             <span className="pill" style={{background:'rgba(167,139,250,0.14)',color:'var(--prot)'}}>P {meal.protein||0}g</span>
             <span className="pill" style={{background:'rgba(251,191,36,0.14)',color:'var(--carb)'}}>C {meal.carbs||0}g</span>
@@ -1572,10 +1107,8 @@
           <div className="meal-cal-num">{meal.calories}</div>
           <div className="meal-cal-lbl">cal</div>
         </div>
-        <button className="icon-btn icon-btn-edit" onClick={() => onEdit(meal)}><IcoEdit size={13}/></button>
-        <button className="icon-btn icon-btn-del"
-          onClick={() => { if(confirming){onDelete(meal.id);}else{setConfirming(true);setTimeout(()=>setConfirming(false),2500);} }}
-          style={confirming ? {background:'rgba(248,113,113,0.28)'} : {}}>
+        <button className="icon-btn icon-btn-edit" aria-label={`Edit ${meal.name}`} onClick={() => onEdit(meal)}><IcoEdit size={13}/></button>
+        <button className="icon-btn icon-btn-del" aria-label={`Remove ${meal.name}`} onClick={() => onDelete(meal.id)}>
           <IcoX size={12}/>
         </button>
       </div>
@@ -1583,198 +1116,33 @@
   }
 
   // ── DASHBOARD ────────────────────────────────────────────────────────────────
-  function DashboardView({ day, days, goals, foodLibrary, sleepLogs, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onRemoveFromLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood }) {
-    const [showWater, setShowWater] = useState(false);
-    const [showWorkout, setShowWorkout] = useState(false);
-    const [showSleep, setShowSleep] = useState(false);
-    const [editingMeal, setEditingMeal] = useState(null);
-
-    const meals    = day.meals    || [];
-    const workouts = day.workouts || [];
-    const mac      = totals(meals);
-    const water    = day.waterOz  || 0;
-    const bur      = burned(workouts);
-    const budget   = goals.calories + bur;
-    const calRem   = budget - mac.calories;
-    const ringColor= scColor(mac.calories, budget);
-    const lastSleep = (sleepLogs||[]).length > 0
-      ? [...(sleepLogs||[])].sort((a,b)=>(b.bedDate+(b.bedTime||'')).localeCompare(a.bedDate+(a.bedTime||'')))[0]
-      : null;
-
-    return (
-      <div className="content">
-        <div className="dash-grid">
-          {/* ── LEFT: daily totals ── */}
-          <div className="dash-left">
-            <div className="card cal-card">
-              <div className="cal-ring-row">
-                <Ring value={mac.calories} max={budget} color={ringColor} size={168} stroke={14}>
-                  <div>
-                    <div className="ring-big" style={{color:ringColor}}>{Math.round(mac.calories)}</div>
-                    <div className="ring-sub">of {Math.round(budget)} kcal</div>
-                  </div>
-                </Ring>
-              </div>
-              <div className="cal-badge" style={{
-                color: calRem>=0 ? 'var(--green)' : 'var(--red)',
-                background: calRem>=0 ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
-                border:`1px solid ${calRem>=0?'rgba(52,211,153,0.22)':'rgba(248,113,113,0.22)'}`,
-              }}>
-                {calRem>=0 ? `${Math.round(calRem)} kcal remaining` : `${Math.round(-calRem)} kcal over`}
-              </div>
-              <div className="cal-stats">
-                <div className="cal-stat"><div className="cal-stat-val" style={{color:'var(--cal)'}}>{Math.round(mac.calories)}</div><div className="cal-stat-lbl">Eaten</div></div>
-                <div className="cal-stat"><div className="cal-stat-val" style={{color:'var(--green)'}}>{Math.round(bur)}</div><div className="cal-stat-lbl">Burned</div></div>
-                <div className="cal-stat"><div className="cal-stat-val" style={{color:calRem>=0?'var(--green)':'var(--red)'}}>{Math.round(Math.abs(calRem))}</div><div className="cal-stat-lbl">{calRem>=0?'Left':'Over'}</div></div>
-                <div className="cal-stat"><div className="cal-stat-val">{Math.round(budget)}</div><div className="cal-stat-lbl">Budget</div></div>
-              </div>
-            </div>
-
-            <div className="card macro-card">
-              <div className="section-label">Macronutrients</div>
-              <div className="macro-rings">
-                {[['Protein',mac.protein,goals.protein,'var(--prot)',false],
-                  ['Carbs',  mac.carbs,  goals.carbs,  'var(--carb)',true ],
-                  ['Fat',    mac.fat,    goals.fat,    'var(--fat)', false]].map(([lbl,val,goal,color,inv])=>{
-                  const r=goal-val, c=scColor(val,goal,inv);
-                  return (
-                    <div key={lbl} className="mc">
-                      <div className="mc-name" style={{color}}>{lbl}</div>
-                      <Ring value={val} max={goal} color={color} size={78} stroke={7}>
-                        <div>
-                          <div style={{fontSize:15,fontWeight:800,color,letterSpacing:'-0.02em'}}>{Math.round(val)}</div>
-                          <div style={{fontSize:9,color:'var(--muted)'}}>/ {goal}</div>
-                        </div>
-                      </Ring>
-                      <div className="mc-rem" style={{background:`${c}1f`,color:c}}>
-                        {r>=0 ? `${Math.round(r)}g left` : `${Math.round(-r)}g over`}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{marginTop:18}}>
-                {(() => {
-                  const r=goals.fiber-mac.fiber, c=scColor(mac.fiber,goals.fiber,false);
-                  return (
-                    <div className="bar-row">
-                      <div className="bar-meta">
-                        <span className="bar-name" style={{color:'var(--fiber)'}}>Fiber</span>
-                        <span className="bar-nums">
-                          <span style={{fontWeight:700,color:c}}>{Math.round(mac.fiber)}g</span>
-                          <span style={{color:'var(--muted)'}}> / {goals.fiber}g · {r>=0?`${Math.round(r)}g left`:`${Math.round(-r)}g over`}</span>
-                        </span>
-                      </div>
-                      <Bar value={mac.fiber} max={goals.fiber} color={c} height={7}/>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-
-          {/* ── RIGHT: activity + meals ── */}
-          <div className="dash-right">
-            <div className="activity-grid">
-              {/* Water */}
-              <div className="mini-card">
-                <div className="mini-head">
-                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(56,189,248,0.13)',color:'var(--water)'}}><IcoWater/></span>Hydration</div>
-                  <div style={{fontSize:13,fontWeight:800,color:'var(--water)'}}>{Math.round(pct(water,goals.water)*100)}%</div>
-                </div>
-                <div><span className="water-num">{Math.round(water)}</span><span className="water-unit">/ {goals.water} oz</span></div>
-                <div style={{marginTop:11}}><Bar value={water} max={goals.water} color="var(--water)" height={8}/></div>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:9,fontWeight:600}}>{water>=goals.water?'Daily goal reached' : `${Math.round(goals.water-water)} oz remaining`}</div>
-                <div className="water-btns">
-                  {[8,16,32].map(oz=><button key={oz} className="w-btn" onClick={()=>onAddWater(oz)}>+{oz}</button>)}
-                  <button className="w-custom" onClick={()=>setShowWater(true)}>···</button>
-                </div>
-              </div>
-
-              {/* Workouts */}
-              <div className="mini-card">
-                <div className="mini-head">
-                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(52,211,153,0.13)',color:'var(--green)'}}><IcoFlame/></span>Workouts</div>
-                </div>
-                <div><span className="burned-num">{bur > 0 ? `+${Math.round(bur)}` : '0'}</span> <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>kcal</span></div>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:4,fontWeight:600}}>{bur > 0 ? 'Added to your budget' : 'No activity yet'}</div>
-                {workouts.length > 0 && <div style={{marginTop:6}}>{workouts.map(w => (
-                  <div key={w.id} className="workout-row">
-                    <div className="workout-dot"/>
-                    <div className="workout-info"><div className="workout-name">{w.name}</div>{w.duration > 0 && <div className="workout-detail">{w.duration} min</div>}</div>
-                    <div className="workout-kcal">+{w.caloriesBurned}</div>
-                    <button className="icon-btn icon-btn-del" style={{width:26,height:26}} onClick={()=>onDeleteWorkout(w.id)}><IcoX size={11}/></button>
-                  </div>
-                ))}</div>}
-                <button className="log-mini-btn green" onClick={()=>setShowWorkout(true)}><IcoPlus size={12}/> Log Workout</button>
-              </div>
-
-              {/* Sleep */}
-              <div className="mini-card">
-                <div className="mini-head">
-                  <div className="mini-title"><span className="mini-ico" style={{background:'rgba(167,139,250,0.13)',color:'var(--prot)'}}><IcoMoon/></span>Sleep</div>
-                </div>
-                {lastSleep
-                  ? <>
-                      <div><span className="sleep-num" style={{color:sleepQColor(lastSleep.hours)}}>{lastSleep.hours.toFixed(1)}</span> <span style={{fontSize:13,fontWeight:600,color:'var(--muted)'}}>hrs</span></div>
-                      <div className="sleep-lbl">{fmt12(lastSleep.bedTime)} → {fmt12(lastSleep.wakeTime)}</div>
-                    </>
-                  : <>
-                      <div><span className="sleep-num" style={{color:'var(--muted)'}}>—</span></div>
-                      <div className="sleep-lbl">No sleep logged</div>
-                    </>
-                }
-                <button className="log-mini-btn purple" onClick={()=>setShowSleep(true)}><IcoPlus size={12}/> Log Sleep</button>
-              </div>
-            </div>
-
-            {/* Meals */}
-            <div>
-              <div className="meals-bar">
-                <div className="meals-title">Today's Meals</div>
-                <button className="btn-accent" onClick={onOpenAddFood}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>
-              </div>
-              <div className="card">
-                {meals.length===0
-                  ? <div className="empty-state"><div className="empty-state-title">Nothing logged yet</div><div className="empty-state-sub">Tap "Log Food" to track your first meal</div></div>
-                  : MEAL_TYPES.map(type => {
-                      const group = meals.filter(m=>m.mealType===type);
-                      if (!group.length) return null;
-                      const gcal = Math.round(totals(group).calories);
-                      return (
-                        <div key={type}>
-                          <div className="meal-group-header">
-                            <div className="meal-group-dot" style={{background:M_COLOR[type]}}/>
-                            <div className="meal-group-name" style={{color:M_COLOR[type]}}>{type}</div>
-                            <div style={{marginLeft:'auto',fontSize:11,fontWeight:700,color:'var(--muted)'}}>{gcal} cal</div>
-                          </div>
-                          {group.map(m => <MealRow key={m.id} meal={m} onDelete={onDeleteMeal} onEdit={m=>setEditingMeal(m)}/>)}
-                        </div>
-                      );
-                    })
-                }
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {showWater   && <WaterModal   onSave={oz=>{onAddWater(oz);setShowWater(false);}}  onClose={()=>setShowWater(false)}/>}
-        {showWorkout && <WorkoutModal onSave={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
-        {showSleep   && <SleepModal   onSave={s=>{onLogSleep(s);setShowSleep(false);}}     onClose={()=>setShowSleep(false)}/>}
-        {editingMeal && (
-          <AddFoodModal
-            foodLibrary={foodLibrary}
-            days={days}
-            initialMeal={editingMeal}
-            onSave={meal => { onEditMeal(editingMeal.id, meal); setEditingMeal(null); }}
-            onAddToLibrary={onAddToLibrary}
-            onRemoveFromLibrary={onRemoveFromLibrary}
-            onClose={() => setEditingMeal(null)}
-          />
-        )}
-      </div>
-    );
+  function DashboardView({ day, days, goals, foodLibrary, sleepLogs, onDeleteMeal, onEditMeal, onAddWater, onAddToLibrary, onAddWorkout, onDeleteWorkout, onLogSleep, onOpenAddFood, onLogWeight, onOpenGoals }) {
+    const [showWater,setShowWater]=useState(false), [showWorkout,setShowWorkout]=useState(false), [showSleep,setShowSleep]=useState(false), [editingMeal,setEditingMeal]=useState(null);
+    const meals=day.meals||[], workouts=day.workouts||[], mac=totals(meals), water=day.waterOz||0;
+    const bur=burned(workouts), budget=goals.calories+bur, remaining=budget-mac.calories;
+    const lastSleep=[...sleepLogs].filter(s=>s.bedDate<=day.date).sort((a,b)=>(b.bedDate+(b.bedTime||'')).localeCompare(a.bedDate+(a.bedTime||'')))[0];
+    const isToday=day.date===todayStr();
+    return <div className="content home-content">
+      <div className="home-heading"><div><h1>{isToday?'A little better, every day.':'Your day, in focus.'}</h1><p className="helper">{isToday?'Small steps. A clearer picture of your day.':fmtFull(day.date)}</p></div><button className="btn btn-primary" onClick={()=>onOpenAddFood()}><IcoPlus size={16}/> Log food</button></div>
+      <div className="home-grid"><div className="home-column">
+        <section className="card home-panel"><div className="section-heading"><h2>{isToday?'Today’s nutrition':'Daily nutrition'}</h2><button className="text-action" onClick={onOpenGoals}>Daily goals ↗</button></div>
+          <div className="home-energy"><Ring value={mac.calories} max={budget} color={remaining>=0?'var(--accent)':'var(--red)'} size={152} stroke={11}><div><div className="home-calories">{Math.round(Math.abs(remaining))}</div><div className="helper">calories {remaining>=0?'left':'over'}</div></div></Ring><div className="home-energy-stats"><div><span className="helper">Eaten</span><strong>{Math.round(mac.calories)} <small>kcal</small></strong></div><div><span className="helper">Daily target</span><strong>{goals.calories} <small>kcal</small></strong></div>{bur>0&&<div><span className="helper">Workout allowance</span><strong>+{Math.round(bur)} <small>kcal</small></strong></div>}</div></div>
+          <div className="home-macros">{[['Protein','protein','var(--prot)'],['Carbs','carbs','var(--carb)'],['Fat','fat','var(--fat)']].map(([label,key,color])=><div key={key}><div>{label}</div><div style={{margin:'10px 0'}}><Bar value={mac[key]} max={goals[key]} color={color} height={5}/></div><strong>{Math.round(mac[key])}<span className="helper"> / {goals[key]} g</span></strong><p className="helper">{Math.round(Math.abs(goals[key]-mac[key]))} g {mac[key]>goals[key]?'over':'left'}</p></div>)}</div>
+          <div className="home-fiber"><span>Fiber</span><span>{Math.round(mac.fiber)} / {goals.fiber} g</span></div>
+        </section>
+        <section className="card home-diary"><div className="section-heading"><h2>Your food diary</h2><span className="helper">{meals.length} entr{meals.length===1?'y':'ies'}</span></div>
+          {MEAL_TYPES.map(type=>{const group=meals.filter(m=>m.mealType===type);return <div className="home-meal-group" key={type}><div className="meal-group-header"><div className="meal-group-name">{type}</div><span className="helper" style={{marginLeft:'auto'}}>{group.length?`${Math.round(totals(group).calories)} kcal`:'Ready when you are'}</span><button className="meal-add" aria-label={`Log ${type.toLowerCase()}`} onClick={()=>onOpenAddFood(type)}><IcoPlus size={15}/></button></div>{group.map(m=><MealRow key={m.id} meal={m} onDelete={onDeleteMeal} onEdit={setEditingMeal}/>)}</div>;})}
+        </section>
+      </div><div className="home-column">
+        <section className="card home-panel"><div className="section-heading"><h2>Hydration</h2><IcoWater size={19}/></div><div className="home-water">{Math.round(water)} <span>/ {goals.water} oz</span></div><p className="helper">{water>=goals.water?'Daily goal reached':`${Math.round(goals.water-water)} oz to your daily goal`}</p><div className="water-segments" aria-hidden="true">{Array.from({length:8},(_,i)=><span key={i} style={{background:i<pct(water,goals.water)*8?'var(--accent)':'var(--card3)'}}/>)}</div><div className="water-btns">{[8,16].map(oz=><button className="w-btn" key={oz} onClick={()=>onAddWater(oz)}>+ {oz} oz</button>)}<button className="w-custom" aria-label="Custom water amount" onClick={()=>setShowWater(true)}>···</button></div></section>
+        <section className="card home-panel"><h2>Daily check-ins</h2><div className="home-checkin"><IcoFlame size={19}/><div><strong>Movement</strong><p className="helper">{workouts.length?`${workouts.length} workout${workouts.length===1?'':'s'} · ${Math.round(bur)} kcal`:'No workout logged'}</p></div><button className="text-action" onClick={()=>setShowWorkout(true)}>Log</button></div><div className="home-checkin"><IcoMoon size={19}/><div><strong>Sleep</strong><p className="helper">{lastSleep?`${lastSleep.hours.toFixed(1)} h · ${fmtShort(lastSleep.bedDate)}`:'No sleep logged'}</p></div><button className="text-action" onClick={()=>setShowSleep(true)}>Log</button></div><div className="home-checkin"><IcoScale size={19}/><div><strong>Weight</strong><p className="helper">{day.weight?`${day.weight} lb`:'No weight logged'}</p></div><button className="text-action" onClick={onLogWeight}>Log</button></div></section>
+        {workouts.length>0&&<section className="card home-panel"><h2>Workouts</h2>{workouts.map(w=><div className="workout-row" key={w.id}><div className="workout-info"><div className="workout-name">{w.name}</div><div className="helper">{w.duration} min · {w.caloriesBurned} kcal</div></div><button className="icon-btn icon-btn-del" aria-label={`Remove ${w.name}`} onClick={()=>onDeleteWorkout(w.id)}><IcoX size={13}/></button></div>)}</section>}
+      </div></div>
+      {showWater&&<WaterModal onSave={oz=>{onAddWater(oz);setShowWater(false);}} onClose={()=>setShowWater(false)}/>}
+      {showWorkout&&<WorkoutModal onSave={w=>{onAddWorkout(w);setShowWorkout(false);}} onClose={()=>setShowWorkout(false)}/>}
+      {showSleep&&<SleepModal onSave={s=>{onLogSleep(s);setShowSleep(false);}} onClose={()=>setShowSleep(false)}/>}
+      {editingMeal&&<AddFoodModal foodLibrary={foodLibrary} days={days} initialMeal={editingMeal} dateLabel={fmtFull(day.date)} onSave={m=>{onEditMeal(editingMeal.id,m);setEditingMeal(null);}} onAddToLibrary={onAddToLibrary} onClose={()=>setEditingMeal(null)}/>}
+    </div>;
   }
 
   // ── HISTORY ──────────────────────────────────────────────────────────────────
@@ -2152,10 +1520,13 @@
 
   function App() {
     const [profile,    setProfile]    = useState(() => load('ft_profile', null));
-    const [days,       setDays]       = useState(() => load('ft_days', {}));
+    const [rawDays,    setDays]       = useState(() => load('ft_days', {}));
     const [foodLib,    setFoodLib]    = useState(() => load('ft_library', SAMPLE_LIBRARY));
     const [weightLogs, setWeightLogs] = useState(() => load('ft_weight_logs', []));
     const [sleepLogs,  setSleepLogs]  = useState(() => load('ft_sleep_logs', []));
+    const linkedDays = useMemo(() => FTFood.linkLegacyDays(rawDays, foodLib), [rawDays, foodLib]);
+    const days = useMemo(() => FTFood.resolveDays(linkedDays, foodLib), [linkedDays, foodLib]);
+    useEffect(() => { if (linkedDays !== rawDays) setDays(linkedDays); }, [linkedDays, rawDays]);
     const today = useToday();
     const [date,       setDate]       = useState(today);
 
@@ -2170,7 +1541,16 @@
     const [tab,        setTab]        = useState('dashboard');
     const [showWL,     setWL]         = useState(false);
     const [showAddFood,setShowAddFood]= useState(false);
+    const [mealType, setMealType] = useState(null);
+    const [notice, setNotice] = useState('');
+    const [undoMeal, setUndoMeal] = useState(null);
     const [showAccount,setShowAccount]= useState(false);
+    const [updateReady,setUpdateReady]= useState(!!window.FT_UPDATE_READY);
+    useEffect(() => {
+      const ready = () => setUpdateReady(true);
+      window.addEventListener('ft-update-ready',ready);
+      return () => window.removeEventListener('ft-update-ready',ready);
+    }, []);
     const sync = useSyncState();
 
     // Changes arriving from another device (or from the initial cloud pull).
@@ -2185,26 +1565,11 @@
     }), []);
 
     useEffect(() => { if(profile) save('ft_profile', profile); }, [profile]);
-    useEffect(() => { save('ft_days', days); }, [days]);
+    useEffect(() => { save('ft_days', rawDays); }, [rawDays]);
     useEffect(() => { save('ft_library', foodLib); }, [foodLib]);
     useEffect(() => { save('ft_weight_logs', weightLogs); }, [weightLogs]);
     useEffect(() => { save('ft_sleep_logs',  sleepLogs);  }, [sleepLogs]);
     useEffect(() => { const el=document.getElementById('loading'); if(el) el.style.display='none'; }, []);
-
-    useEffect(() => {
-      setFoodLib(prev => {
-        const libNames = new Set(prev.map(f => f.name.toLowerCase()));
-        const seen = new Set(); const newFoods = [];
-        Object.values(days).forEach(d => (d.meals||[]).forEach(meal => {
-          const key = meal.name.toLowerCase();
-          if (!libNames.has(key) && !seen.has(key) && meal.name) {
-            seen.add(key);
-            newFoods.push({ id:Date.now()+Math.random(), name:meal.name, calories:meal.calories||0, protein:meal.protein||0, carbs:meal.carbs||0, fat:meal.fat||0, fiber:meal.fiber||0, servingSize:meal.servingSize||'' });
-          }
-        }));
-        return newFoods.length > 0 ? [...prev, ...newFoods] : prev;
-      });
-    }, []); // eslint-disable-line
 
     useEffect(() => {
       setWeightLogs(prev => {
@@ -2232,8 +1597,8 @@
     const tombstone = (d, id) => ({ ...(d.removed||{}), [id]: Date.now() });
 
     const addMeal       = m  => updateDay(date, d => ({ ...d, meals:[...(d.meals||[]),m] }));
-    const deleteMeal    = id => updateDay(date, d => ({ ...d, meals:(d.meals||[]).filter(m=>m.id!==id), removed:tombstone(d,id) }));
-    const editMeal      = (id,u) => updateDay(date, d => ({ ...d, meals:(d.meals||[]).map(m=>m.id===id?{...u,id}:m) }));
+    const deleteMeal = id => {setUndoMeal({date,meal:days[date]?.meals.find(m=>m.id===id)}); updateDay(date, d => ({...d,meals:(d.meals||[]).filter(m=>m.id!==id),removed:tombstone(d,id)}));};
+    const editMeal      = (id,u) => updateDay(date, d => ({ ...d, meals:(d.meals||[]).map(m=>m.id===id?{...u,id,updatedAt:Date.now()}:m) }));
     const addWater      = oz => updateDay(date, d => ({ ...d, waterOz:Math.max(0,(d.waterOz||0)+oz) }));
     const addWorkout    = w  => updateDay(date, d => ({ ...d, workouts:[...(d.workouts||[]),w] }));
     const deleteWorkout = id => updateDay(date, d => ({ ...d, workouts:(d.workouts||[]).filter(w=>w.id!==id), removed:tombstone(d,id) }));
@@ -2244,21 +1609,17 @@
       setWL(false);
     };
     const logSleep      = s  => setSleepLogs(prev=>[...prev,s]);
-    const addToLib      = f  => setFoodLib(prev => {
-      const k = (f.name||'').trim().toLowerCase();
-      const i = prev.findIndex(e => (e.name||'').trim().toLowerCase() === k);
-      if (i >= 0) { const c = [...prev]; c[i] = { ...prev[i], ...f, id:prev[i].id }; return c; }
-      return [...prev, {...f, id:Date.now()+Math.random()}];
-    });
-    const deleteFromLib = id => setFoodLib(prev => prev.filter(f=>f.id!==id));
-    const removeFromLib = nm => setFoodLib(prev => prev.filter(f => (f.name||'').trim().toLowerCase() !== (nm||'').trim().toLowerCase()));
-    const updateInLib   = f  => {
-      const before = foodLib.find(e => e.id === f.id);
-      setFoodLib(prev => prev.map(e => e.id===f.id ? f : e));
-      // A corrected food should correct the history it produced.
-      setDays(prev => restateLoggedMeals(prev, before, f));
+    const addToLib = f => setFoodLib(prev => [...prev, {...f,updatedAt:Date.now()}]);
+    const deleteFromLib = id => {setFoodLib(prev=>prev.map(f=>f.id===id?{...f,archived:true,updatedAt:Date.now()}:f));setNotice('Food archived. Past logs remain linked. Restore it from Archived in the food database.');};
+    const removeFromLib = () => {};
+    const updateInLib = f => {
+      const migrated = FTFood.linkLegacyDays(rawDays,foodLib);
+      const count = FTFood.impact(migrated,f);
+      setDays(migrated);
+      setFoodLib(prev => prev.some(e=>e.id===f.id) ? prev.map(e=>e.id===f.id?{...f,updatedAt:Date.now()}:e) : [...prev,{...f,updatedAt:Date.now()}]);
+      setNotice('Food saved. '+count.entries+' linked logs now use the updated definition.');
     };
-    const logFoodToday  = m  => updateDay(today, d => ({ ...d, meals:[...(d.meals||[]),m] }));
+    const logFoodToday = m => updateDay(today,d=>({...d,meals:[...(d.meals||[]),m]}));
 
     const currentDay = getDay(date);
 
@@ -2305,7 +1666,7 @@
           </div>
           <div className="nav-cap">Menu</div>
           <nav className="nav">
-            {[['dashboard',<IcoDash/>,'Dashboard'],['history',<IcoHist/>,'History'],['profile',<IcoProf/>,'Goals & Profile']].map(([t,icon,lbl])=>(
+            {[['dashboard',<IcoDash/>,'Today'],['database',<IcoSearch/>,'Food database'],['history',<IcoHist/>,'History'],['profile',<IcoProf/>,'Goals & Profile']].map(([t,icon,lbl])=>(
               <button key={t} className={`nav-item ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
                 <span className="nav-ico">{icon}</span><span className="nav-label">{lbl}</span>
               </button>
@@ -2337,7 +1698,7 @@
                   {!isToday && <button className="today-pill" onClick={()=>setDate(today)}>Jump to Today</button>}
                 </div>
               ) : (
-                <div className="topbar-title">{tab==='history' ? 'History' : 'Goals & Profile'}</div>
+                <div className="topbar-title">{tab==='history' ? 'History' : tab==='database' ? 'Food database' : 'Goals & Profile'}</div>
               )}
             </div>
             <div className="topbar-right">
@@ -2346,16 +1707,20 @@
               </div>
               <SyncPill onClick={()=>setShowAccount(true)}/>
               <button className="weight-chip" onClick={()=>setWL(true)}>{currentDay.weight ? `${currentDay.weight} lbs` : '+ Log Weight'}</button>
-              {tab==='dashboard' && <button className="btn-accent" onClick={()=>setShowAddFood(true)}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>}
+              {tab==='dashboard' && <button className="btn-accent" onClick={()=>{setMealType(null);setShowAddFood(true);}}><IcoPlus size={13}/> <span className="topbar-add-label">Log Food</span></button>}
             </div>
           </header>
 
           <div className="scroll-area">
+            {updateReady&&<div className="app-notice" role="status">An update is ready. Finish your current entry, then reload.<button onClick={()=>window.location.reload()}>Reload app</button></div>}
+            {notice&&<div className="app-notice" role="status">{notice}<button onClick={()=>setNotice('')} aria-label="Dismiss notification">×</button></div>}
+            {undoMeal&&<div className="app-notice" role="status">Food removed.<button onClick={()=>{if(undoMeal.meal)updateDay(undoMeal.date,d=>({...d,meals:[...(d.meals||[]),{...undoMeal.meal,id:FTFood.id(),updatedAt:Date.now()}]}));setUndoMeal(null);}}>Undo</button><button onClick={()=>setUndoMeal(null)} aria-label="Dismiss undo">×</button></div>}
+            {tab==='database'&&<div className="content"><FoodDatabase library={foodLib} days={days} onDelete={deleteFromLib} onEdit={updateInLib} onAdd={addToLib} onLog={logFoodToday} dateLabel={fmtFull(today)}/></div>}
             {tab==='dashboard' && <DashboardView day={currentDay} days={days} goals={goals} foodLibrary={foodLib} sleepLogs={sleepLogs}
               onDeleteMeal={deleteMeal} onEditMeal={editMeal}
               onAddWater={addWater} onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
               onAddWorkout={addWorkout} onDeleteWorkout={deleteWorkout} onLogSleep={logSleep}
-              onOpenAddFood={()=>setShowAddFood(true)}/>}
+              onLogWeight={()=>setWL(true)} onOpenGoals={()=>setTab('profile')} onOpenAddFood={type=>{setMealType(type||null);setShowAddFood(true);}}/>}
             {tab==='history'   && <HistoryView days={days} goals={goals} onNavigate={d=>{setDate(d);setTab('dashboard');}}/>}
             {tab==='profile'   && <ProfileView profile={profile} goals={goals} days={days} foodLibrary={foodLib}
               weightLogs={weightLogs} sleepLogs={sleepLogs}
@@ -2368,7 +1733,7 @@
         </div>
 
         {showWL && <LogWeightModal current={currentDay.weight} onSave={logWeight} onClose={()=>setWL(false)}/>}
-        {showAddFood && <AddFoodModal foodLibrary={foodLib} days={days}
+        {showAddFood && <AddFoodModal foodLibrary={foodLib} days={days} initialType={mealType} dateLabel={fmtFull(date)}
           onSave={m=>{addMeal(m);setShowAddFood(false);}}
           onAddToLibrary={addToLib} onRemoveFromLibrary={removeFromLib}
           onClose={()=>setShowAddFood(false)}/>}

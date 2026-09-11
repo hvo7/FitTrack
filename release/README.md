@@ -1,5 +1,24 @@
 # Release builds
 
+## Updating the installed app on this machine
+
+The user's active installation is
+`C:\Users\henry\AppData\Local\Programs\FitTrack\FitTrack.exe`.
+Run `npm run update:installed` from the repository to test, package, and update
+that installation. The updater preserves a timestamped `resources/app.asar`
+backup and writes a `resources/local-update.json` receipt, then reopens FitTrack.
+
+This local installation serves its bundled live/dev assets at the original app
+origin, preserving the existing Electron account and diary storage. It does not
+wait for GitHub Pages deployments. Rebuildable service-worker caches are cleared
+so an old hosted screen cannot override the installed release.
+
+`npm run package:installed` prepares the archive without installing it.
+`node tests/desktop-smoke.cjs` verifies the prepared desktop bundle in an
+isolated profile, including offline loading and storage across restarts.
+
+## Standalone release builds
+
 Windows desktop builds, produced by `npm run build:desktop` and copied here from
 `dist/`.
 

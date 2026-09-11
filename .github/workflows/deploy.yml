@@ -58,6 +58,7 @@ jobs:
         working-directory: live
         run: |
           npm ci
+          npm test
           npm run build:web
 
       - name: Build dev
